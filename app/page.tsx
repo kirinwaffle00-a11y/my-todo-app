@@ -41,14 +41,21 @@ export default function Home() {
   
   // Notification state
   const [notifPermission, setNotifPermission] = useState<NotificationPermission>("default");
-  
-  // Sync flags
+
+  // Hydration state
   const [isMounted, setIsMounted] = useState(false);
+  // Sync loaded ref
   const isLoaded = useRef(false);
+
+  // Keep a ref to the latest category state to avoid dependency loops in polling
+  const categoryRef = useRef(category);
+  useEffect(() => {
+    categoryRef.current = category;
+  }, [category]);
 
   // Request browser notifications
   const requestNotificationPermission = async () => {
-    if (typeof window === "undefined" || !("Notification" in window)) return;
+    if (typeof window === "undefined" || typeof Notification === "undefined") return;
     try {
       const permission = await Notification.requestPermission();
       setNotifPermission(permission);
@@ -85,7 +92,7 @@ export default function Home() {
         setTasks(migratedTasks);
         setCategories(migratedCategories);
         
-        if (!migratedCategories.includes(category) && migratedCategories.length > 0) {
+        if (!migratedCategories.includes(categoryRef.current) && migratedCategories.length > 0) {
           setCategory(migratedCategories[0]);
         }
       }
@@ -97,8 +104,13 @@ export default function Home() {
   // Initial load
   useEffect(() => {
     setIsMounted(true);
-    if (typeof window !== "undefined" && "Notification" in window) {
-      setNotifPermission(Notification.permission);
+    
+    try {
+      if (typeof window !== "undefined" && typeof Notification !== "undefined" && "permission" in Notification) {
+        setNotifPermission(Notification.permission);
+      }
+    } catch (e) {
+      console.error("Failed to read notification permission:", e);
     }
     
     fetchState().then(() => {
@@ -110,7 +122,7 @@ export default function Home() {
     }, 5000);
 
     return () => clearInterval(syncInterval);
-  }, [category]);
+  }, []);
 
   // Save back to server
   const saveStateToServer = async (updatedTasks: Task[], updatedCategories: string[]) => {
@@ -253,7 +265,7 @@ export default function Home() {
         if (now >= deadlineDate) {
           hasUpdates = true;
           
-          if (Notification.permission === "granted") {
+          if (typeof Notification !== "undefined" && Notification.permission === "granted") {
             new Notification("⏰ FocusTodo リマインダー", {
               body: `タスク「${task.text}」の締切時間になりました！`,
             });
