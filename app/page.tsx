@@ -362,33 +362,39 @@ export default function Home() {
     }
     detailsText = `${detailsText}\n\n---\nCreated via FocusTodo`;
     const details = encodeURIComponent(detailsText);
-    
-    let startStr = "";
-    if (task.startDate) {
-      startStr = task.startDate.replace(/-/g, "");
-    } else {
-      // Use local date (not UTC) to avoid timezone shift in Japan (UTC+9)
-      const now = new Date();
-      const yy = now.getFullYear();
-      const mm = String(now.getMonth() + 1).padStart(2, "0");
-      const dd = String(now.getDate()).padStart(2, "0");
-      startStr = `${yy}${mm}${dd}`;
-    }
 
-    let endStr = "";
-    if (task.dueDate) {
-      if (task.dueTime) {
-        // Timed event: use datetime format
-        endStr = task.dueDate.replace(/-/g, "") + `T${task.dueTime.replace(/:/g, "")}00`;
-      } else {
-        // All-day event: Google Calendar end date is EXCLUSIVE → must add 1 day
-        // e.g. to show "ends May 30", we pass "May 31" in the URL
-        const [y, mo, d] = task.dueDate.split("-").map(Number);
-        const next = new Date(y, mo - 1, d + 1);
-        endStr = `${next.getFullYear()}${String(next.getMonth() + 1).padStart(2, "0")}${String(next.getDate()).padStart(2, "0")}`;
-      }
+    // Helper: "YYYY-MM-DD" → "YYYYMMDD"
+    const fmt = (iso: string) => iso.replace(/-/g, "");
+
+    // Helper: "YYYY-MM-DD" → "YYYYMMDD" of the NEXT day (for exclusive end date)
+    const fmtNextDay = (iso: string) => {
+      const [y, mo, d] = iso.split("-").map(Number);
+      const next = new Date(y, mo - 1, d + 1);
+      return `${next.getFullYear()}${String(next.getMonth() + 1).padStart(2, "0")}${String(next.getDate()).padStart(2, "0")}`;
+    };
+
+    // Today's local date as "YYYYMMDD"
+    const todayStr = () => {
+      const now = new Date();
+      return `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}`;
+    };
+
+    const startBase = task.startDate ? fmt(task.startDate) : todayStr();
+    let startStr: string;
+    let endStr: string;
+
+    if (task.dueDate && task.dueTime) {
+      // === TIMED EVENT ===
+      startStr = `${startBase}T090000`; // Default start time
+      endStr = `${fmt(task.dueDate)}T${task.dueTime.replace(":", "")}00`;
+    } else if (task.dueDate) {
+      // === ALL-DAY EVENT ===
+      startStr = startBase;
+      endStr = fmtNextDay(task.dueDate);
     } else {
-      endStr = startStr;
+      // No due date → single all-day event
+      startStr = startBase;
+      endStr = startBase;
     }
 
     const dates = `${startStr}/${endStr}`;
