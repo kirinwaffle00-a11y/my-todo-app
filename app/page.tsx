@@ -52,26 +52,31 @@ export default function Home() {
   // localStorage keys
   const LS_TASKS = "focustodo_tasks";
   const LS_CATS = "focustodo_categories";
+  const LS_LAST_WRITE = "focustodo_last_write";
 
   // Load from localStorage
-  const loadFromLocalStorage = (): { tasks: Task[]; categories: string[] } => {
+  const loadFromLocalStorage = (): { tasks: Task[]; categories: string[]; lastWrite: number } => {
     try {
       const t = localStorage.getItem(LS_TASKS);
       const c = localStorage.getItem(LS_CATS);
+      const w = localStorage.getItem(LS_LAST_WRITE);
       return {
         tasks: t ? JSON.parse(t) : [],
         categories: c ? JSON.parse(c) : ["勉強用", "その他"],
+        lastWrite: w ? Number(w) : 0,
       };
     } catch {
-      return { tasks: [], categories: ["勉強用", "その他"] };
+      return { tasks: [], categories: ["勉強用", "その他"], lastWrite: 0 };
     }
   };
 
-  // Save to localStorage
+  // Save to localStorage (including timestamp so protection survives page reloads)
   const saveToLocalStorage = (t: Task[], c: string[]) => {
     try {
+      const now = Date.now();
       localStorage.setItem(LS_TASKS, JSON.stringify(t));
       localStorage.setItem(LS_CATS, JSON.stringify(c));
+      localStorage.setItem(LS_LAST_WRITE, String(now));
     } catch {
       // localStorage unavailable (private browsing etc.) — ignore
     }
@@ -99,11 +104,11 @@ export default function Home() {
     }
   };
 
-  // Fetch from server (skipped if server is unavailable or user just wrote)
+  // Fetch from server (skipped if server is unavailable or we wrote recently)
   const fetchState = async () => {
-    if (!serverAvailable.current) return; // Vercel/offline: skip polling
+    if (!serverAvailable.current) return;
     const timeSinceWrite = Date.now() - lastLocalWrite.current;
-    if (timeSinceWrite < 10000) return;
+    if (timeSinceWrite < 30000) return; // 30s protection window
 
     try {
       const res = await fetch("/api/tasks");
@@ -113,35 +118,39 @@ export default function Home() {
       const data = await res.json();
       if (!data || typeof data !== "object") throw new Error("Invalid data");
 
-      const migratedTasks = (data.tasks || []).map((task: any) => {
+      const serverTasks: Task[] = (data.tasks || []).map((task: any) => {
         let migratedCat = task.category;
         if (task.category === "study") migratedCat = "勉強用";
         else if (task.category === "other") migratedCat = "その他";
         return { ...task, category: migratedCat };
       });
-      const migratedCategories = (data.categories || ["勉強用", "その他"]).map((cat: string) => {
+      const serverCats: string[] = (data.categories || ["勉強用", "その他"]).map((cat: string) => {
         if (cat === "study") return "勉強用";
         if (cat === "other") return "その他";
         return cat;
       });
 
-      // Only accept server data if it has content, OR if localStorage is also empty
       const local = loadFromLocalStorage();
-      if (migratedTasks.length === 0 && local.tasks.length > 0) {
-        // Server is empty but we have localStorage data — server can't persist (Vercel)
-        // Disable server sync so polling doesn't erase local data
+
+      // Smart merge: if server has no tasks but local does, server can't save (Vercel)
+      if (serverTasks.length === 0 && local.tasks.length > 0) {
         serverAvailable.current = false;
         return;
       }
 
-      setTasks(migratedTasks);
-      setCategories(migratedCategories);
-      saveToLocalStorage(migratedTasks, migratedCategories);
-      if (!migratedCategories.includes(categoryRef.current) && migratedCategories.length > 0) {
-        setCategory(migratedCategories[0]);
+      // Use whichever dataset has MORE tasks (prevents losing locally-added tasks)
+      const useServer = serverTasks.length >= local.tasks.length;
+      const finalTasks = useServer ? serverTasks : local.tasks;
+      const finalCats = useServer ? serverCats : local.categories;
+
+      setTasks(finalTasks);
+      setCategories(finalCats);
+      saveToLocalStorage(finalTasks, finalCats);
+      lastLocalWrite.current = Date.now(); // reset timer after successful sync
+      if (!finalCats.includes(categoryRef.current) && finalCats.length > 0) {
+        setCategory(finalCats[0]);
       }
     } catch {
-      // Server unreachable — fall back to localStorage only
       serverAvailable.current = false;
     } finally {
       isLoaded.current = true;
@@ -157,6 +166,10 @@ export default function Home() {
     if (local.tasks.length > 0 || local.categories.length > 0) {
       setTasks(local.tasks);
       setCategories(local.categories);
+    }
+    // Restore write-protection timestamp so page reloads don't bypass the guard
+    if (local.lastWrite > 0) {
+      lastLocalWrite.current = local.lastWrite;
     }
 
     try {
