@@ -367,17 +367,25 @@ export default function Home() {
     if (task.startDate) {
       startStr = task.startDate.replace(/-/g, "");
     } else {
-      const d = new Date(task.createdAt);
-      startStr = d.toISOString().substring(0, 10).replace(/-/g, "");
+      // Use local date (not UTC) to avoid timezone shift in Japan (UTC+9)
+      const now = new Date();
+      const yy = now.getFullYear();
+      const mm = String(now.getMonth() + 1).padStart(2, "0");
+      const dd = String(now.getDate()).padStart(2, "0");
+      startStr = `${yy}${mm}${dd}`;
     }
 
     let endStr = "";
     if (task.dueDate) {
-      endStr = task.dueDate.replace(/-/g, "");
       if (task.dueTime) {
-        endStr += `T${task.dueTime.replace(/:/g, "")}00`;
+        // Timed event: use datetime format
+        endStr = task.dueDate.replace(/-/g, "") + `T${task.dueTime.replace(/:/g, "")}00`;
       } else {
-        endStr += "T235959";
+        // All-day event: Google Calendar end date is EXCLUSIVE → must add 1 day
+        // e.g. to show "ends May 30", we pass "May 31" in the URL
+        const [y, mo, d] = task.dueDate.split("-").map(Number);
+        const next = new Date(y, mo - 1, d + 1);
+        endStr = `${next.getFullYear()}${String(next.getMonth() + 1).padStart(2, "0")}${String(next.getDate()).padStart(2, "0")}`;
       }
     } else {
       endStr = startStr;
