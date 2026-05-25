@@ -46,6 +46,36 @@ export default function Home() {
   const isLoaded = useRef(false);
   // Track when user last made a local change, to prevent polling from overwriting it
   const lastLocalWrite = useRef<number>(0);
+  // Track if server is available (false = Vercel/offline mode, use localStorage only)
+  const serverAvailable = useRef<boolean>(true);
+
+  // localStorage keys
+  const LS_TASKS = "focustodo_tasks";
+  const LS_CATS = "focustodo_categories";
+
+  // Load from localStorage
+  const loadFromLocalStorage = (): { tasks: Task[]; categories: string[] } => {
+    try {
+      const t = localStorage.getItem(LS_TASKS);
+      const c = localStorage.getItem(LS_CATS);
+      return {
+        tasks: t ? JSON.parse(t) : [],
+        categories: c ? JSON.parse(c) : ["勉強用", "その他"],
+      };
+    } catch {
+      return { tasks: [], categories: ["勉強用", "その他"] };
+    }
+  };
+
+  // Save to localStorage
+  const saveToLocalStorage = (t: Task[], c: string[]) => {
+    try {
+      localStorage.setItem(LS_TASKS, JSON.stringify(t));
+      localStorage.setItem(LS_CATS, JSON.stringify(c));
+    } catch {
+      // localStorage unavailable (private browsing etc.) — ignore
+    }
+  };
 
   // Keep a ref to the latest category state to avoid dependency loops in polling
   const categoryRef = useRef(category);
@@ -69,49 +99,50 @@ export default function Home() {
     }
   };
 
-  // Fetch from server
+  // Fetch from server (skipped if server is unavailable or user just wrote)
   const fetchState = async () => {
-    // Don't overwrite state if user made a local change within the last 10 seconds
+    if (!serverAvailable.current) return; // Vercel/offline: skip polling
     const timeSinceWrite = Date.now() - lastLocalWrite.current;
     if (timeSinceWrite < 10000) return;
 
     try {
       const res = await fetch("/api/tasks");
-      if (res.ok) {
-        const contentType = res.headers.get("content-type");
-        if (!contentType || !contentType.includes("application/json")) {
-          throw new Error("Server returned non-JSON response.");
-        }
-        
-        const data = await res.json();
-        if (!data || typeof data !== "object") {
-          throw new Error("Invalid format received from server.");
-        }
-        
-        const migratedTasks = (data.tasks || []).map((task: any) => {
-          let migratedCat = task.category;
-          if (task.category === "study") migratedCat = "勉強用";
-          else if (task.category === "other") migratedCat = "その他";
-          return { ...task, category: migratedCat };
-        });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const contentType = res.headers.get("content-type");
+      if (!contentType?.includes("application/json")) throw new Error("Non-JSON response");
+      const data = await res.json();
+      if (!data || typeof data !== "object") throw new Error("Invalid data");
 
-        const migratedCategories = (data.categories || ["勉強用", "その他"]).map((cat: string) => {
-          if (cat === "study") return "勉強用";
-          if (cat === "other") return "その他";
-          return cat;
-        });
+      const migratedTasks = (data.tasks || []).map((task: any) => {
+        let migratedCat = task.category;
+        if (task.category === "study") migratedCat = "勉強用";
+        else if (task.category === "other") migratedCat = "その他";
+        return { ...task, category: migratedCat };
+      });
+      const migratedCategories = (data.categories || ["勉強用", "その他"]).map((cat: string) => {
+        if (cat === "study") return "勉強用";
+        if (cat === "other") return "その他";
+        return cat;
+      });
 
-        setTasks(migratedTasks);
-        setCategories(migratedCategories);
-        
-        if (!migratedCategories.includes(categoryRef.current) && migratedCategories.length > 0) {
-          setCategory(migratedCategories[0]);
-        }
-      } else {
-        throw new Error(`HTTP error: ${res.status}`);
+      // Only accept server data if it has content, OR if localStorage is also empty
+      const local = loadFromLocalStorage();
+      if (migratedTasks.length === 0 && local.tasks.length > 0) {
+        // Server is empty but we have localStorage data — server can't persist (Vercel)
+        // Disable server sync so polling doesn't erase local data
+        serverAvailable.current = false;
+        return;
       }
-    } catch (error) {
-      console.error("Failed to fetch state from server:", error);
+
+      setTasks(migratedTasks);
+      setCategories(migratedCategories);
+      saveToLocalStorage(migratedTasks, migratedCategories);
+      if (!migratedCategories.includes(categoryRef.current) && migratedCategories.length > 0) {
+        setCategory(migratedCategories[0]);
+      }
+    } catch {
+      // Server unreachable — fall back to localStorage only
+      serverAvailable.current = false;
     } finally {
       isLoaded.current = true;
     }
@@ -119,40 +150,43 @@ export default function Home() {
 
   // Initial load
   useEffect(() => {
-    // Mark as ready immediately so saves are never silently dropped
     isLoaded.current = true;
+
+    // Load from localStorage immediately (instant, no network needed)
+    const local = loadFromLocalStorage();
+    if (local.tasks.length > 0 || local.categories.length > 0) {
+      setTasks(local.tasks);
+      setCategories(local.categories);
+    }
 
     try {
       if (typeof window !== "undefined" && "Notification" in window) {
         setNotifPermission(Notification.permission);
       }
-    } catch (e) {
-      // Notification not available in this environment (iOS Safari, Norton sandbox, etc.)
+    } catch {
+      // Notification not available
     }
-    
+
+    // Then also try to sync with local server (for PC↔iPhone Wi-Fi sync)
     fetchState();
-
-    const syncInterval = setInterval(() => {
-      fetchState();
-    }, 5000);
-
+    const syncInterval = setInterval(fetchState, 5000);
     return () => clearInterval(syncInterval);
   }, []);
 
-  // Save back to server
+  // Save to server AND localStorage
   const saveStateToServer = async (updatedTasks: Task[], updatedCategories: string[]) => {
-    lastLocalWrite.current = Date.now(); // mark that we just made a local write
+    lastLocalWrite.current = Date.now();
+    // Always save to localStorage first (instant, works on Vercel too)
+    saveToLocalStorage(updatedTasks, updatedCategories);
+    // Also try server (for Wi-Fi sync when running locally)
     try {
       await fetch("/api/tasks", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          tasks: updatedTasks,
-          categories: updatedCategories
-        }),
+        body: JSON.stringify({ tasks: updatedTasks, categories: updatedCategories }),
       });
-    } catch (error) {
-      console.error("Failed to save state to server:", error);
+    } catch {
+      // Server unavailable — localStorage already saved above
     }
   };
 
