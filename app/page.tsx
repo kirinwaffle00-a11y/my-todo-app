@@ -44,6 +44,8 @@ export default function Home() {
 
   // Sync loaded ref
   const isLoaded = useRef(false);
+  // Track when user last made a local change, to prevent polling from overwriting it
+  const lastLocalWrite = useRef<number>(0);
 
   // Keep a ref to the latest category state to avoid dependency loops in polling
   const categoryRef = useRef(category);
@@ -69,12 +71,16 @@ export default function Home() {
 
   // Fetch from server
   const fetchState = async () => {
+    // Don't overwrite state if user made a local change within the last 10 seconds
+    const timeSinceWrite = Date.now() - lastLocalWrite.current;
+    if (timeSinceWrite < 10000) return;
+
     try {
       const res = await fetch("/api/tasks");
       if (res.ok) {
         const contentType = res.headers.get("content-type");
         if (!contentType || !contentType.includes("application/json")) {
-          throw new Error("Server returned non-JSON response. Possible network block or captive portal.");
+          throw new Error("Server returned non-JSON response.");
         }
         
         const data = await res.json();
@@ -135,6 +141,7 @@ export default function Home() {
 
   // Save back to server
   const saveStateToServer = async (updatedTasks: Task[], updatedCategories: string[]) => {
+    lastLocalWrite.current = Date.now(); // mark that we just made a local write
     try {
       await fetch("/api/tasks", {
         method: "POST",
