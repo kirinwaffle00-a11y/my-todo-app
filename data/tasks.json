@@ -1,17 +1,5 @@
 {
-  "tasks": [
-    {
-      "id": "1779679871939",
-      "text": "情報リテラシー",
-      "completed": false,
-      "category": "勉強用",
-      "startDate": "2026-05-25",
-      "dueDate": "2026-05-26",
-      "dueTime": "12:30",
-      "notified": false,
-      "createdAt": 1779679871939
-    }
-  ],
+  "tasks": [],
   "categories": [
     "勉強用",
     "その他"

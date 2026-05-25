@@ -74,7 +74,15 @@ export default function Home() {
     try {
       const res = await fetch("/api/tasks");
       if (res.ok) {
+        const contentType = res.headers.get("content-type");
+        if (!contentType || !contentType.includes("application/json")) {
+          throw new Error("Server returned non-JSON response. Possible network block or captive portal.");
+        }
+        
         const data = await res.json();
+        if (!data || typeof data !== "object") {
+          throw new Error("Invalid format received from server.");
+        }
         
         const migratedTasks = (data.tasks || []).map((task: any) => {
           let migratedCat = task.category;
@@ -95,9 +103,13 @@ export default function Home() {
         if (!migratedCategories.includes(categoryRef.current) && migratedCategories.length > 0) {
           setCategory(migratedCategories[0]);
         }
+      } else {
+        throw new Error(`HTTP error: ${res.status}`);
       }
     } catch (error) {
       console.error("Failed to fetch state from server:", error);
+    } finally {
+      isLoaded.current = true;
     }
   };
 
@@ -106,16 +118,14 @@ export default function Home() {
     setIsMounted(true);
     
     try {
-      if (typeof window !== "undefined" && typeof Notification !== "undefined" && "permission" in Notification) {
+      if (typeof window !== "undefined" && "Notification" in window) {
         setNotifPermission(Notification.permission);
       }
     } catch (e) {
-      console.error("Failed to read notification permission:", e);
+      console.error("Failed to safely read notification permission:", e);
     }
     
-    fetchState().then(() => {
-      isLoaded.current = true;
-    });
+    fetchState();
 
     const syncInterval = setInterval(() => {
       fetchState();
@@ -265,10 +275,14 @@ export default function Home() {
         if (now >= deadlineDate) {
           hasUpdates = true;
           
-          if (typeof Notification !== "undefined" && Notification.permission === "granted") {
-            new Notification("⏰ FocusTodo リマインダー", {
-              body: `タスク「${task.text}」の締切時間になりました！`,
-            });
+          try {
+            if (typeof window !== "undefined" && "Notification" in window && Notification.permission === "granted") {
+              new Notification("⏰ FocusTodo リマインダー", {
+                body: `タスク「${task.text}」の締切時間になりました！`,
+              });
+            }
+          } catch (e) {
+            console.error("Failed to safely trigger visual notification:", e);
           }
           
           return { ...task, notified: true };
@@ -321,8 +335,25 @@ export default function Home() {
     return `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${title}&details=${details}&dates=${dates}`;
   };
 
+  // 🚀 Hydration protection: Return clean static loading screen BEFORE any complex calculations
+  if (!isMounted) {
+    return (
+      <div className="app-container" style={{ opacity: 0.5 }}>
+        <header className="header">
+          <h1>FocusTodo</h1>
+          <p>Initializing your space...</p>
+        </header>
+      </div>
+    );
+  }
+
+  // Guarantee arrays
+  const safeTasks = Array.isArray(tasks) ? tasks : [];
+  const safeCategories = Array.isArray(categories) ? categories : ["勉強用", "その他"];
+
   // Filter lists
-  const filteredTasks = tasks.filter((task) => {
+  const filteredTasks = safeTasks.filter((task) => {
+    if (!task) return false;
     const matchesStatus =
       statusFilter === "active" ? !task.completed :
       statusFilter === "completed" ? task.completed : true;
@@ -357,19 +388,8 @@ export default function Home() {
     return { label: `締切: ${formatted}`, type: "normal" };
   };
 
-  const activeTasksCount = tasks.filter((task) => !task.completed).length;
-  const completedTasksCount = tasks.length - activeTasksCount;
-
-  if (!isMounted) {
-    return (
-      <div className="app-container" style={{ opacity: 0.5 }}>
-        <header className="header">
-          <h1>FocusTodo</h1>
-          <p>Initializing your space...</p>
-        </header>
-      </div>
-    );
-  }
+  const activeTasksCount = safeTasks.filter((task) => task && !task.completed).length;
+  const completedTasksCount = safeTasks.length - activeTasksCount;
 
   return (
     <div className="app-container">
@@ -446,16 +466,16 @@ export default function Home() {
                 <div className="option-group">
                   <label>カテゴリー</label>
                   <div className="category-select-container" style={{ flexWrap: "wrap", rowGap: "8px" }}>
-                    {categories.map((cat) => (
+                    {safeCategories.map((cat) => (
                       <button
                         key={cat}
                         type="button"
                         className={`category-select-btn ${category === cat ? "selected study" : ""}`}
                         onClick={() => setCategory(cat)}
-                        style={{ position: "relative", paddingRight: categories.length > 1 ? "24px" : "14px" }}
+                        style={{ position: "relative", paddingRight: safeCategories.length > 1 ? "24px" : "14px" }}
                       >
                         {cat}
-                        {categories.length > 1 && (
+                        {safeCategories.length > 1 && (
                           <span
                             onClick={(e) => handleDeleteCategory(cat, e)}
                             style={{
@@ -578,7 +598,7 @@ export default function Home() {
                 >
                   すべて
                 </button>
-                {categories.map((cat) => (
+                {safeCategories.map((cat) => (
                   <button
                     key={cat}
                     type="button"
@@ -810,7 +830,7 @@ export default function Home() {
 
       {/* Footer */}
       <footer className="footer-note">
-        <p>© {new Date().getFullYear()} FocusTodo. Securely Connected.</p>
+        <p>© 2026 FocusTodo. Securely Connected.</p>
       </footer>
     </div>
   );
