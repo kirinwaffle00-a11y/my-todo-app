@@ -113,6 +113,9 @@ export default function Home() {
 
   // Initial load
   useEffect(() => {
+    // Mark as ready immediately so saves are never silently dropped
+    isLoaded.current = true;
+
     try {
       if (typeof window !== "undefined" && "Notification" in window) {
         setNotifPermission(Notification.permission);
@@ -132,7 +135,6 @@ export default function Home() {
 
   // Save back to server
   const saveStateToServer = async (updatedTasks: Task[], updatedCategories: string[]) => {
-    if (!isLoaded.current) return;
     try {
       await fetch("/api/tasks", {
         method: "POST",
