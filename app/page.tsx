@@ -42,8 +42,6 @@ export default function Home() {
   // Notification state
   const [notifPermission, setNotifPermission] = useState<NotificationPermission>("default");
 
-  // Hydration state
-  const [isMounted, setIsMounted] = useState(false);
   // Sync loaded ref
   const isLoaded = useRef(false);
 
@@ -115,14 +113,12 @@ export default function Home() {
 
   // Initial load
   useEffect(() => {
-    setIsMounted(true);
-    
     try {
       if (typeof window !== "undefined" && "Notification" in window) {
         setNotifPermission(Notification.permission);
       }
     } catch (e) {
-      console.error("Failed to safely read notification permission:", e);
+      // Notification not available in this environment (iOS Safari, Norton sandbox, etc.)
     }
     
     fetchState();
@@ -335,19 +331,7 @@ export default function Home() {
     return `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${title}&details=${details}&dates=${dates}`;
   };
 
-  // 🚀 Hydration protection: Return clean static loading screen BEFORE any complex calculations
-  if (!isMounted) {
-    return (
-      <div className="app-container" style={{ opacity: 0.5 }}>
-        <header className="header">
-          <h1>FocusTodo</h1>
-          <p>Initializing your space...</p>
-        </header>
-      </div>
-    );
-  }
-
-  // Guarantee arrays
+  // Guarantee arrays (safe fallbacks so nothing ever crashes even with empty/partial data)
   const safeTasks = Array.isArray(tasks) ? tasks : [];
   const safeCategories = Array.isArray(categories) ? categories : ["勉強用", "その他"];
 
