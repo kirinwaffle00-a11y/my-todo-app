@@ -60,6 +60,8 @@ export default function Home() {
   const [notifPermission, setNotifPermission] = useState<NotificationPermission>("default");
 
   // ── Pomodoro Timer ──
+  const [workDuration, setWorkDuration] = useState(25);
+  const [breakDuration, setBreakDuration] = useState(5);
   const [timerSeconds, setTimerSeconds] = useState(25 * 60);
   const [timerRunning, setTimerRunning] = useState(false);
   const [timerMode, setTimerMode] = useState<"work" | "break">("work");
@@ -178,6 +180,26 @@ export default function Home() {
       setTasks(restored);
       setCategories(local.categories);
     }
+    
+    // Load custom work / break durations
+    const savedWork = localStorage.getItem("focustodo_work_dur");
+    const savedBreak = localStorage.getItem("focustodo_break_dur");
+    let initialWorkMins = 25;
+    if (savedWork) {
+      const w = parseInt(savedWork, 10);
+      if (!isNaN(w) && w > 0) {
+        setWorkDuration(w);
+        initialWorkMins = w;
+      }
+    }
+    if (savedBreak) {
+      const b = parseInt(savedBreak, 10);
+      if (!isNaN(b) && b > 0) {
+        setBreakDuration(b);
+      }
+    }
+    setTimerSeconds(initialWorkMins * 60);
+
     if (local.lastWrite > 0) lastLocalWrite.current = local.lastWrite;
 
     try {
@@ -192,6 +214,36 @@ export default function Home() {
   }, [fetchState]);
 
   // ── Pomodoro Timer Logic ──────────────────────────────────────────────────
+  const updateWorkDuration = (mins: number) => {
+    const val = Math.min(180, Math.max(0, mins));
+    setWorkDuration(val);
+    localStorage.setItem("focustodo_work_dur", String(val));
+    if (!timerRunning && timerMode === "work") {
+      setTimerSeconds(val * 60);
+    }
+  };
+
+  const updateBreakDuration = (mins: number) => {
+    const val = Math.min(60, Math.max(0, mins));
+    setBreakDuration(val);
+    localStorage.setItem("focustodo_break_dur", String(val));
+    if (!timerRunning && timerMode === "break") {
+      setTimerSeconds(val * 60);
+    }
+  };
+
+  const handleWorkDurationBlur = () => {
+    if (!workDuration || workDuration < 1) {
+      updateWorkDuration(25);
+    }
+  };
+
+  const handleBreakDurationBlur = () => {
+    if (!breakDuration || breakDuration < 1) {
+      updateBreakDuration(5);
+    }
+  };
+
   useEffect(() => {
     if (timerRunning) {
       timerRef.current = setInterval(() => {
@@ -201,18 +253,26 @@ export default function Home() {
             setTimerRunning(false);
             const isWork = timerMode === "work";
             setTimerMode(isWork ? "break" : "work");
-            setTimerSeconds(isWork ? 5 * 60 : 25 * 60);
+            
+            const wDur = workDuration || 25;
+            const bDur = breakDuration || 5;
+            const nextSeconds = isWork ? bDur * 60 : wDur * 60;
+
+            setTimerSeconds(nextSeconds);
             if (isWork) setTimerCycles((c) => c + 1);
+
             // Celebration confetti for finishing a work session
             if (isWork) {
               confetti({ particleCount: 80, spread: 60, origin: { y: 0.5 }, colors: ["#818cf8", "#34d399", "#fb923c"] });
             }
             try {
               new Notification("FocusTodo", {
-                body: isWork ? "🎉 25分集中完了！5分休憩しましょう。" : "⏰ 休憩終了！次のセッションを始めましょう。",
+                body: isWork 
+                  ? `🎉 ${wDur}分集中完了！${bDur}分休憩しましょう。` 
+                  : "⏰ 休憩終了！次のセッションを始めましょう。",
               });
             } catch { /* no notification permission */ }
-            return isWork ? 5 * 60 : 25 * 60;
+            return nextSeconds;
           }
           return s - 1;
         });
@@ -221,19 +281,19 @@ export default function Home() {
       if (timerRef.current) clearInterval(timerRef.current);
     }
     return () => { if (timerRef.current) clearInterval(timerRef.current); };
-  }, [timerRunning, timerMode]);
+  }, [timerRunning, timerMode, workDuration, breakDuration]);
 
   const resetTimer = () => {
     setTimerRunning(false);
     setTimerMode("work");
-    setTimerSeconds(25 * 60);
+    setTimerSeconds((workDuration || 25) * 60);
   };
 
   const timerMinutes = Math.floor(timerSeconds / 60);
   const timerSecs = timerSeconds % 60;
   const timerProgress = timerMode === "work"
-    ? 1 - timerSeconds / (25 * 60)
-    : 1 - timerSeconds / (5 * 60);
+    ? 1 - timerSeconds / ((workDuration || 25) * 60)
+    : 1 - timerSeconds / ((breakDuration || 5) * 60);
 
   // ── Reminder Notifications ────────────────────────────────────────────────
   useEffect(() => {
@@ -509,6 +569,77 @@ export default function Home() {
               </svg>
               <div className="pomodoro-time">
                 {String(timerMinutes).padStart(2, "0")}:{String(timerSecs).padStart(2, "0")}
+              </div>
+            </div>
+
+            {/* Duration Settings */}
+            <div className={`timer-settings ${timerRunning ? "disabled" : ""}`}>
+              <div className="timer-settings-group">
+                <span className="timer-settings-label">🎯 集中時間:</span>
+                <div className="timer-presets-row">
+                  {[15, 25, 50].map((mins) => (
+                    <button
+                      key={mins}
+                      type="button"
+                      className={`timer-preset-btn timer-preset-btn--work ${workDuration === mins ? "active" : ""}`}
+                      onClick={() => updateWorkDuration(mins)}
+                      disabled={timerRunning}
+                    >
+                      {mins}分
+                    </button>
+                  ))}
+                  <div className="timer-custom-input-wrapper">
+                    <input
+                      type="number"
+                      min="1"
+                      max="180"
+                      value={workDuration || ""}
+                      onChange={(e) => {
+                        const val = parseInt(e.target.value, 10);
+                        updateWorkDuration(isNaN(val) ? 0 : val);
+                      }}
+                      onBlur={handleWorkDurationBlur}
+                      disabled={timerRunning}
+                      className="timer-custom-input"
+                      placeholder="カスタム"
+                    />
+                    <span className="timer-custom-unit">分</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="timer-settings-group">
+                <span className="timer-settings-label">☕ 休憩時間:</span>
+                <div className="timer-presets-row">
+                  {[5, 10, 15].map((mins) => (
+                    <button
+                      key={mins}
+                      type="button"
+                      className={`timer-preset-btn timer-preset-btn--break ${breakDuration === mins ? "active" : ""}`}
+                      onClick={() => updateBreakDuration(mins)}
+                      disabled={timerRunning}
+                    >
+                      {mins}分
+                    </button>
+                  ))}
+                  <div className="timer-custom-input-wrapper">
+                    <input
+                      type="number"
+                      min="1"
+                      max="60"
+                      value={breakDuration || ""}
+                      onChange={(e) => {
+                        const val = parseInt(e.target.value, 10);
+                        updateBreakDuration(isNaN(val) ? 0 : val);
+                      }}
+                      onBlur={handleBreakDurationBlur}
+                      disabled={timerRunning}
+                      className="timer-custom-input"
+                      placeholder="カスタム"
+                    />
+                    <span className="timer-custom-unit">分</span>
+                  </div>
+                </div>
               </div>
             </div>
 
