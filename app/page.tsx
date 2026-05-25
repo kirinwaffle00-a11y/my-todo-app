@@ -518,6 +518,147 @@ export default function Home() {
     <span className={`priority-dot priority-dot--${p}`} title={`優先度: ${PRIORITY_LABEL[p]}`} />
   );
 
+  // ── Priority groups split ──
+  const highPriorityTasks = filteredTasks.filter((task) => (task.priority ?? "medium") === "high");
+  const mediumPriorityTasks = filteredTasks.filter((task) => (task.priority ?? "medium") === "medium");
+  const lowPriorityTasks = filteredTasks.filter((task) => (task.priority ?? "medium") === "low");
+
+  const renderPrioritySection = (
+    priority: "high" | "medium" | "low",
+    label: string,
+    colorClass: string,
+    sectionTasks: Task[]
+  ) => {
+    return (
+      <div className={`priority-section priority-section--${priority}`} key={priority}>
+        <div className="priority-section-header">
+          <div className="priority-section-title-wrap">
+            <span className={`priority-section-dot priority-section-dot--${priority}`} />
+            <h3 className="priority-section-title">{label}</h3>
+          </div>
+          <span className="priority-section-count">
+            {sectionTasks.length}
+          </span>
+        </div>
+
+        <ul className="todo-list">
+          {sectionTasks.length > 0 ? (
+            sectionTasks.map((task) => {
+              const dateStatus = getDateStatus(task.dueDate, task.dueTime, task.completed);
+              const isExpanded = expandedTaskId === task.id;
+              return (
+                <li
+                  key={task.id}
+                  className={`todo-item priority-border--${task.priority ?? "medium"} ${task.completed ? "completed" : ""}`}
+                  onClick={() => setExpandedTaskId(isExpanded ? null : task.id)}
+                  id={`task-item-${task.id}`}
+                >
+                  <div className="todo-item-main-row">
+                    <div className="todo-item-left">
+                      {/* Checkbox */}
+                      <div className="custom-checkbox" onClick={(e) => { e.stopPropagation(); handleToggleComplete(task.id); }}>
+                        <svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12" /></svg>
+                      </div>
+
+                      <div className="todo-content-wrapper">
+                        <div className="todo-text-row">
+                          {/* Priority dot */}
+                          <PriorityDot p={task.priority ?? "medium"} />
+                          {/* Category badge */}
+                          <span className={`cat-badge ${task.category === "勉強用" ? "study" : "other"}`}>{task.category}</span>
+                          <span className="todo-text">{task.text}</span>
+                          {/* Routine indicator */}
+                          {task.isRoutine && <span title="毎日ルーティン" style={{ fontSize: "0.75rem" }}>🔁</span>}
+                          {/* Memo indicator */}
+                          {task.description && (
+                            <span className="has-desc-indicator" title="詳細メモあり">
+                              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                                <polyline points="14 2 14 8 20 8" />
+                                <line x1="16" y1="13" x2="8" y2="13" />
+                                <line x1="16" y1="17" x2="8" y2="17" />
+                              </svg>
+                            </span>
+                          )}
+                        </div>
+                        {(task.startDate || dateStatus.label) && (
+                          <div className="dates-row">
+                            {task.startDate && (
+                              <span className="date-badge">
+                                <svg viewBox="0 0 24 24" strokeWidth="2"><rect x="3" y="4" width="18" height="18" rx="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" /></svg>
+                                開始: {task.startDate.substring(5).replace("-", "/")}
+                              </span>
+                            )}
+                            {dateStatus.label && (
+                              <span className={`date-badge ${dateStatus.type}`}>
+                                <svg viewBox="0 0 24 24" strokeWidth="2.5"><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></svg>
+                                {dateStatus.label}
+                              </span>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    <button type="button" className="delete-btn" onClick={(e) => handleDeleteTask(task.id, e)} title="タスクを削除" id={`task-delete-btn-${task.id}`}>
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                        <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+                      </svg>
+                    </button>
+                  </div>
+
+                  {/* Expanded panel */}
+                  {isExpanded && (
+                    <div className="todo-expanded-panel" onClick={(e) => e.stopPropagation()}>
+                      {/* Priority editor */}
+                      <div>
+                        <div className="todo-desc-label">優先度</div>
+                        <div className="priority-selector" style={{ marginTop: "6px" }}>
+                          {(["high", "medium", "low"] as Task["priority"][]).map((p) => (
+                            <button
+                              key={p}
+                              type="button"
+                              className={`priority-btn priority-btn--${p} ${(task.priority ?? "medium") === p ? "selected" : ""}`}
+                              onClick={() => {
+                                const updated = tasks.map((t) => t.id === task.id ? { ...t, priority: p } : t);
+                                updateState(updated, categories);
+                              }}
+                            >
+                              <span className={`priority-dot priority-dot--${p}`} />
+                              {PRIORITY_LABEL[p]}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="todo-desc-label">具体的な詳細内容（メモ）</div>
+                      <div className="todo-desc-text">{task.description || "詳細メモはありません。"}</div>
+
+                      <a href={getGoogleCalendarUrl(task)} target="_blank" rel="noopener noreferrer" className="calendar-sync-btn">
+                        <svg viewBox="0 0 24 24" strokeWidth="2.5" strokeLinecap="round">
+                          <rect x="3" y="4" width="18" height="18" rx="2" />
+                          <line x1="16" y1="2" x2="16" y2="6" />
+                          <line x1="8" y1="2" x2="8" y2="6" />
+                          <line x1="3" y1="10" x2="21" y2="10" />
+                          <circle cx="12" cy="16" r="2" />
+                        </svg>
+                        Googleカレンダーに登録
+                      </a>
+                    </div>
+                  )}
+                </li>
+              );
+            })
+          ) : (
+            <div className="priority-empty-state">
+              <p>この優先度のタスクはありません。</p>
+            </div>
+          )}
+        </ul>
+      </div>
+    );
+  };
+
   // ── Render ────────────────────────────────────────────────────────────────
   return (
     <div className="app-container">
@@ -814,115 +955,14 @@ export default function Home() {
             </div>
           </div>
 
-          {/* Task list */}
-          <ul className="todo-list" id="todo-task-list">
+          {/* Task list grouped by priority */}
+          <div className="priority-groups-container" id="todo-task-list">
             {filteredTasks.length > 0 ? (
-              filteredTasks.map((task) => {
-                const dateStatus = getDateStatus(task.dueDate, task.dueTime, task.completed);
-                const isExpanded = expandedTaskId === task.id;
-                return (
-                  <li
-                    key={task.id}
-                    className={`todo-item priority-border--${task.priority ?? "medium"} ${task.completed ? "completed" : ""}`}
-                    onClick={() => setExpandedTaskId(isExpanded ? null : task.id)}
-                    id={`task-item-${task.id}`}
-                  >
-                    <div className="todo-item-main-row">
-                      <div className="todo-item-left">
-                        {/* Checkbox */}
-                        <div className="custom-checkbox" onClick={(e) => { e.stopPropagation(); handleToggleComplete(task.id); }}>
-                          <svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12" /></svg>
-                        </div>
-
-                        <div className="todo-content-wrapper">
-                          <div className="todo-text-row">
-                            {/* Priority dot */}
-                            <PriorityDot p={task.priority ?? "medium"} />
-                            {/* Category badge */}
-                            <span className={`cat-badge ${task.category === "勉強用" ? "study" : "other"}`}>{task.category}</span>
-                            <span className="todo-text">{task.text}</span>
-                            {/* Routine indicator */}
-                            {task.isRoutine && <span title="毎日ルーティン" style={{ fontSize: "0.75rem" }}>🔁</span>}
-                            {/* Memo indicator */}
-                            {task.description && (
-                              <span className="has-desc-indicator" title="詳細メモあり">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                                  <polyline points="14 2 14 8 20 8" />
-                                  <line x1="16" y1="13" x2="8" y2="13" />
-                                  <line x1="16" y1="17" x2="8" y2="17" />
-                                </svg>
-                              </span>
-                            )}
-                          </div>
-                          {(task.startDate || dateStatus.label) && (
-                            <div className="dates-row">
-                              {task.startDate && (
-                                <span className="date-badge">
-                                  <svg viewBox="0 0 24 24" strokeWidth="2"><rect x="3" y="4" width="18" height="18" rx="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" /></svg>
-                                  開始: {task.startDate.substring(5).replace("-", "/")}
-                                </span>
-                              )}
-                              {dateStatus.label && (
-                                <span className={`date-badge ${dateStatus.type}`}>
-                                  <svg viewBox="0 0 24 24" strokeWidth="2.5"><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></svg>
-                                  {dateStatus.label}
-                                </span>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-
-                      <button type="button" className="delete-btn" onClick={(e) => handleDeleteTask(task.id, e)} title="タスクを削除" id={`task-delete-btn-${task.id}`}>
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                          <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
-                        </svg>
-                      </button>
-                    </div>
-
-                    {/* Expanded panel */}
-                    {isExpanded && (
-                      <div className="todo-expanded-panel" onClick={(e) => e.stopPropagation()}>
-                        {/* Priority editor */}
-                        <div>
-                          <div className="todo-desc-label">優先度</div>
-                          <div className="priority-selector" style={{ marginTop: "6px" }}>
-                            {(["high", "medium", "low"] as Task["priority"][]).map((p) => (
-                              <button
-                                key={p}
-                                type="button"
-                                className={`priority-btn priority-btn--${p} ${(task.priority ?? "medium") === p ? "selected" : ""}`}
-                                onClick={() => {
-                                  const updated = tasks.map((t) => t.id === task.id ? { ...t, priority: p } : t);
-                                  updateState(updated, categories);
-                                }}
-                              >
-                                <span className={`priority-dot priority-dot--${p}`} />
-                                {PRIORITY_LABEL[p]}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-
-                        <div className="todo-desc-label">具体的な詳細内容（メモ）</div>
-                        <div className="todo-desc-text">{task.description || "詳細メモはありません。"}</div>
-
-                        <a href={getGoogleCalendarUrl(task)} target="_blank" rel="noopener noreferrer" className="calendar-sync-btn">
-                          <svg viewBox="0 0 24 24" strokeWidth="2.5" strokeLinecap="round">
-                            <rect x="3" y="4" width="18" height="18" rx="2" />
-                            <line x1="16" y1="2" x2="16" y2="6" />
-                            <line x1="8" y1="2" x2="8" y2="6" />
-                            <line x1="3" y1="10" x2="21" y2="10" />
-                            <circle cx="12" cy="16" r="2" />
-                          </svg>
-                          Googleカレンダーに登録
-                        </a>
-                      </div>
-                    )}
-                  </li>
-                );
-              })
+              <>
+                {renderPrioritySection("high", "🔥 高（今日絶対）", "high", highPriorityTasks)}
+                {renderPrioritySection("medium", "⚡ 中（お早めに）", "medium", mediumPriorityTasks)}
+                {renderPrioritySection("low", "🌱 低（できれば）", "low", lowPriorityTasks)}
+              </>
             ) : (
               <div className="empty-state" id="todo-empty-state">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
@@ -931,7 +971,7 @@ export default function Home() {
                 <p>{categoryFilter === "all" ? "タスクがありません。新しく追加してみましょう！" : `「${categoryFilter}」のタスクはありません。`}</p>
               </div>
             )}
-          </ul>
+          </div>
 
           {completedTasksCount > 0 && (
             <div className="controls-row" style={{ borderBottom: "none", marginTop: "16px", paddingBottom: 0 }}>
