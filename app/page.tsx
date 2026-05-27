@@ -43,6 +43,13 @@ export default function Home() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [categories, setCategories] = useState<string[]>(["勉強用", "その他"]);
 
+  // ── Discord Notification States ──
+  const [discordWebhookUrl, setDiscordWebhookUrl] = useState("");
+  const [discordNotifyTime, setDiscordNotifyTime] = useState("08:00");
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [isTestingDiscord, setIsTestingDiscord] = useState(false);
+  const [testStatus, setTestStatus] = useState<null | "success" | "error">(null);
+
   // ── Form States ──
   const [inputText, setInputText] = useState("");
   const [description, setDescription] = useState("");
@@ -84,12 +91,16 @@ export default function Home() {
   const LS_TASKS = "focustodo_tasks";
   const LS_CATS  = "focustodo_categories";
   const LS_LAST_WRITE = "focustodo_last_write";
+  const LS_DISCORD_WEBHOOK = "focustodo_discord_webhook";
+  const LS_DISCORD_TIME = "focustodo_discord_time";
 
-  const loadFromLocalStorage = (): { tasks: Task[]; categories: string[]; lastWrite: number } => {
+  const loadFromLocalStorage = (): { tasks: Task[]; categories: string[]; lastWrite: number; discordWebhookUrl: string; discordNotifyTime: string } => {
     try {
       const t = localStorage.getItem(LS_TASKS);
       const c = localStorage.getItem(LS_CATS);
       const w = localStorage.getItem(LS_LAST_WRITE);
+      const dw = localStorage.getItem(LS_DISCORD_WEBHOOK) || "";
+      const dt = localStorage.getItem(LS_DISCORD_TIME) || "08:00";
       const rawTasks: Task[] = t ? JSON.parse(t) : [];
       // Ensure all tasks have required fields (backward-compat migration)
       const migratedTasks = rawTasks.map((task: any) => ({
@@ -101,18 +112,22 @@ export default function Home() {
         tasks: migratedTasks,
         categories: c ? JSON.parse(c) : ["勉強用", "その他"],
         lastWrite: w ? Number(w) : 0,
+        discordWebhookUrl: dw,
+        discordNotifyTime: dt,
       };
     } catch {
-      return { tasks: [], categories: ["勉強用", "その他"], lastWrite: 0 };
+      return { tasks: [], categories: ["勉強用", "その他"], lastWrite: 0, discordWebhookUrl: "", discordNotifyTime: "08:00" };
     }
   };
 
-  const saveToLocalStorage = (t: Task[], c: string[]) => {
+  const saveToLocalStorage = (t: Task[], c: string[], dw?: string, dt?: string) => {
     try {
       const now = Date.now();
       localStorage.setItem(LS_TASKS, JSON.stringify(t));
       localStorage.setItem(LS_CATS, JSON.stringify(c));
       localStorage.setItem(LS_LAST_WRITE, String(now));
+      if (dw !== undefined) localStorage.setItem(LS_DISCORD_WEBHOOK, dw);
+      if (dt !== undefined) localStorage.setItem(LS_DISCORD_TIME, dt);
     } catch { /* localStorage unavailable */ }
   };
 
@@ -150,6 +165,8 @@ export default function Home() {
       const serverCats: string[] = (data.categories || ["勉強用", "その他"]).map((c: string) =>
         c === "study" ? "勉強用" : c === "other" ? "その他" : c
       );
+      const serverWebhook = data.discordWebhookUrl || "";
+      const serverTime = data.discordNotifyTime || "08:00";
 
       const local = loadFromLocalStorage();
       if (serverTasks.length === 0 && local.tasks.length > 0) {
@@ -160,10 +177,14 @@ export default function Home() {
       const useServer = serverTasks.length >= local.tasks.length;
       const finalTasks = applyRoutineRestore(useServer ? serverTasks : local.tasks);
       const finalCats = useServer ? serverCats : local.categories;
+      const finalWebhook = useServer ? serverWebhook : local.discordWebhookUrl;
+      const finalTime = useServer ? serverTime : local.discordNotifyTime;
 
       setTasks(finalTasks);
       setCategories(finalCats);
-      saveToLocalStorage(finalTasks, finalCats);
+      setDiscordWebhookUrl(finalWebhook);
+      setDiscordNotifyTime(finalTime);
+      saveToLocalStorage(finalTasks, finalCats, finalWebhook, finalTime);
       lastLocalWrite.current = Date.now();
       if (!finalCats.includes(categoryRef.current) && finalCats.length > 0) {
         setCategory(finalCats[0]);
@@ -185,6 +206,8 @@ export default function Home() {
       setTasks(restored);
       setCategories(local.categories);
     }
+    setDiscordWebhookUrl(local.discordWebhookUrl);
+    setDiscordNotifyTime(local.discordNotifyTime);
     
     // Load custom work / break durations
     const savedWork = localStorage.getItem("focustodo_work_dur");
@@ -326,22 +349,31 @@ export default function Home() {
   }, [tasks, categories]);
 
   // ── Save ──────────────────────────────────────────────────────────────────
-  const saveStateToServer = async (updatedTasks: Task[], updatedCategories: string[]) => {
+  const saveStateToServer = async (updatedTasks: Task[], updatedCategories: string[], dw?: string, dt?: string) => {
     lastLocalWrite.current = Date.now();
-    saveToLocalStorage(updatedTasks, updatedCategories);
+    const webhook = dw !== undefined ? dw : discordWebhookUrl;
+    const notifyTime = dt !== undefined ? dt : discordNotifyTime;
+    saveToLocalStorage(updatedTasks, updatedCategories, webhook, notifyTime);
     try {
       await fetch("/api/tasks", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tasks: updatedTasks, categories: updatedCategories }),
+        body: JSON.stringify({ 
+          tasks: updatedTasks, 
+          categories: updatedCategories,
+          discordWebhookUrl: webhook,
+          discordNotifyTime: notifyTime
+        }),
       });
     } catch { /* localStorage already saved */ }
   };
 
-  const updateState = (newTasks: Task[], newCategories: string[]) => {
+  const updateState = (newTasks: Task[], newCategories: string[], dw?: string, dt?: string) => {
     setTasks(newTasks);
     setCategories(newCategories);
-    saveStateToServer(newTasks, newCategories);
+    if (dw !== undefined) setDiscordWebhookUrl(dw);
+    if (dt !== undefined) setDiscordNotifyTime(dt);
+    saveStateToServer(newTasks, newCategories, dw, dt);
   };
 
   // ── Handlers ──────────────────────────────────────────────────────────────
@@ -380,6 +412,16 @@ export default function Home() {
     }
 
     updateState([newTask, ...tasks], categories);
+
+    // ── Discord Real-time Notification ──
+    if (discordWebhookUrl) {
+      fetch("/api/discord/notify-added", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ webhookUrl: discordWebhookUrl, task: newTask }),
+      }).catch(err => console.error("Discord notifications addition failed:", err));
+    }
+
     setInputText("");
     setDescription("");
     setStartDate("");
@@ -701,36 +743,52 @@ export default function Home() {
             <h1>FocusTodo</h1>
             <p>Your synchronized personal space</p>
           </div>
-          {/* Google Sign-in */}
-          {session ? (
+          <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+            {/* Discord Settings Button */}
             <button
               type="button"
-              className="gcal-signin-btn gcal-signin-btn--signed"
-              onClick={() => signOut({ redirect: false })}
-              title={`${session.user?.name ?? session.user?.email} としてサインイン中`}
+              className="settings-toggle-btn"
+              onClick={() => setShowSettingsModal(true)}
+              title="設定を開く"
             >
-              {session.user?.image && (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={session.user.image} alt="" className="gcal-avatar" />
-              )}
-              <span>🔗 カレンダー連携中</span>
-              <span className="gcal-signout-hint">（タップでサインアウト）</span>
-            </button>
-          ) : (
-            <button
-              type="button"
-              className="gcal-signin-btn"
-              onClick={() => signIn("google", { callbackUrl: window.location.origin })}
-            >
-              <svg viewBox="0 0 24 24" width="16" height="16">
-                <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
-                <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
-                <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z"/>
-                <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="3" />
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
               </svg>
-              Googleでサインイン
+              <span>設定</span>
             </button>
-          )}
+
+            {/* Google Sign-in */}
+            {session ? (
+              <button
+                type="button"
+                className="gcal-signin-btn gcal-signin-btn--signed"
+                onClick={() => signOut({ redirect: false })}
+                title={`${session.user?.name ?? session.user?.email} としてサインイン中`}
+              >
+                {session.user?.image && (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={session.user.image} alt="" className="gcal-avatar" />
+                )}
+                <span>🔗 カレンダー</span>
+                <span className="gcal-signout-hint">（切断）</span>
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="gcal-signin-btn"
+                onClick={() => signIn("google", { callbackUrl: window.location.origin })}
+              >
+                <svg viewBox="0 0 24 24" width="16" height="16">
+                  <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                  <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                  <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z"/>
+                  <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+                </svg>
+                Google連携
+              </button>
+            )}
+          </div>
         </div>
       </header>
 
@@ -1051,6 +1109,141 @@ export default function Home() {
       <footer className="footer-note">
         <p>© 2026 FocusTodo. Securely Connected.</p>
       </footer>
+
+      {/* ── Settings Modal (Glassmorphism) ── */}
+      {showSettingsModal && (
+        <div className="modal-overlay" onClick={() => {
+          const local = loadFromLocalStorage();
+          setDiscordWebhookUrl(local.discordWebhookUrl);
+          setDiscordNotifyTime(local.discordNotifyTime);
+          setShowSettingsModal(false);
+          setTestStatus(null);
+        }}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>⚙️ FocusTodo 設定</h2>
+              <button type="button" className="close-x-btn" onClick={() => {
+                const local = loadFromLocalStorage();
+                setDiscordWebhookUrl(local.discordWebhookUrl);
+                setDiscordNotifyTime(local.discordNotifyTime);
+                setShowSettingsModal(false);
+                setTestStatus(null);
+              }}>✕</button>
+            </div>
+            
+            <div className="modal-body" style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+              <div className="settings-section">
+                <h3>🔔 Discord 通知機能</h3>
+                <p className="settings-desc">
+                  DiscordのWebhookと連携し、新しいタスクの追加時や、毎朝の本日締切タスクのサマリーを自動でチャンネルに通知します。
+                </p>
+                
+                <div className="settings-form-group">
+                  <label htmlFor="discord-webhook-url">Discord Webhook URL</label>
+                  <input
+                    type="url"
+                    id="discord-webhook-url"
+                    className="todo-input"
+                    style={{ fontSize: "0.85rem", width: "100%", height: "42px" }}
+                    placeholder="https://discord.com/api/webhooks/..."
+                    value={discordWebhookUrl}
+                    onChange={(e) => setDiscordWebhookUrl(e.target.value)}
+                  />
+                  <span className="input-hint">
+                    ※ チャンネル設定の「連携サービス」から Webhook URL を取得して貼り付けてください。
+                  </span>
+                </div>
+
+                <div className="settings-form-group">
+                  <label htmlFor="discord-notify-time">毎日の通知時間 (日本時間 JST)</label>
+                  <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+                    <input
+                      type="time"
+                      id="discord-notify-time"
+                      className="date-input"
+                      style={{ width: "110px", height: "40px", fontSize: "0.95rem", textAlign: "center" }}
+                      value={discordNotifyTime}
+                      onChange={(e) => setDiscordNotifyTime(e.target.value)}
+                    />
+                    <span className="input-hint">
+                      この時間に、今日締め切りを迎える未完了のタスク一覧を自動通知します。
+                    </span>
+                  </div>
+                </div>
+
+                <div style={{ display: "flex", gap: "12px", alignItems: "center", marginTop: "4px", flexWrap: "wrap" }}>
+                  <button
+                    type="button"
+                    className="test-webhook-btn"
+                    onClick={async () => {
+                      if (!discordWebhookUrl) {
+                        setTestStatus("error");
+                        alert("Webhook URLを入力してください。");
+                        return;
+                      }
+                      setIsTestingDiscord(true);
+                      setTestStatus(null);
+                      try {
+                        const res = await fetch("/api/discord/test", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ webhookUrl: discordWebhookUrl }),
+                        });
+                        if (res.ok) {
+                          setTestStatus("success");
+                        } else {
+                          setTestStatus("error");
+                        }
+                      } catch {
+                        setTestStatus("error");
+                      } finally {
+                        setIsTestingDiscord(false);
+                      }
+                    }}
+                    disabled={isTestingDiscord}
+                  >
+                    {isTestingDiscord ? "送信中..." : "🔗 テスト送信を実行"}
+                  </button>
+
+                  {testStatus === "success" && (
+                    <span className="status-success-badge">✅ 送信成功！</span>
+                  )}
+                  {testStatus === "error" && (
+                    <span className="status-error-badge">❌ 送信失敗</span>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div className="modal-footer">
+              <button
+                type="button"
+                className="modal-save-btn"
+                onClick={() => {
+                  updateState(tasks, categories, discordWebhookUrl, discordNotifyTime);
+                  setShowSettingsModal(false);
+                  setTestStatus(null);
+                }}
+              >
+                設定を保存して閉じる
+              </button>
+              <button
+                type="button"
+                className="modal-cancel-btn"
+                onClick={() => {
+                  const local = loadFromLocalStorage();
+                  setDiscordWebhookUrl(local.discordWebhookUrl);
+                  setDiscordNotifyTime(local.discordNotifyTime);
+                  setShowSettingsModal(false);
+                  setTestStatus(null);
+                }}
+              >
+                キャンセル
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

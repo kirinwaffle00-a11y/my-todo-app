@@ -10,12 +10,16 @@ const FILE_PATH = path.join(DATA_DIR, "tasks.json");
 interface SyncState {
   tasks: any[];
   categories: string[];
+  discordWebhookUrl?: string;
+  discordNotifyTime?: string;
 }
 
 // Default state if tasks.json doesn't exist
 const DEFAULT_STATE: SyncState = {
   tasks: [],
-  categories: ["勉強用", "その他"] // Default built-in categories
+  categories: ["勉強用", "その他"], // Default built-in categories
+  discordWebhookUrl: "",
+  discordNotifyTime: "08:00"
 };
 
 // Helper to safely read and auto-migrate tasks database schema
@@ -29,14 +33,18 @@ async function loadState(): Promise<SyncState> {
     if (Array.isArray(parsed)) {
       return {
         tasks: parsed,
-        categories: DEFAULT_STATE.categories
+        categories: DEFAULT_STATE.categories,
+        discordWebhookUrl: DEFAULT_STATE.discordWebhookUrl,
+        discordNotifyTime: DEFAULT_STATE.discordNotifyTime,
       };
     }
 
     // Standard schema validation
     return {
       tasks: Array.isArray(parsed.tasks) ? parsed.tasks : [],
-      categories: Array.isArray(parsed.categories) ? parsed.categories : DEFAULT_STATE.categories
+      categories: Array.isArray(parsed.categories) ? parsed.categories : DEFAULT_STATE.categories,
+      discordWebhookUrl: typeof parsed.discordWebhookUrl === "string" ? parsed.discordWebhookUrl : DEFAULT_STATE.discordWebhookUrl,
+      discordNotifyTime: typeof parsed.discordNotifyTime === "string" ? parsed.discordNotifyTime : DEFAULT_STATE.discordNotifyTime,
     };
   } catch (error: any) {
     if (error.code === "ENOENT") {
@@ -76,11 +84,18 @@ export async function POST(request: Request) {
 
     const tasks = Array.isArray(updatedState.tasks) ? updatedState.tasks : [];
     const categories = Array.isArray(updatedState.categories) ? updatedState.categories : DEFAULT_STATE.categories;
+    const discordWebhookUrl = typeof updatedState.discordWebhookUrl === "string" ? updatedState.discordWebhookUrl : "";
+    const discordNotifyTime = typeof updatedState.discordNotifyTime === "string" ? updatedState.discordNotifyTime : "08:00";
 
-    const stateToSave: SyncState = { tasks, categories };
+    const stateToSave: SyncState = { tasks, categories, discordWebhookUrl, discordNotifyTime };
     await saveState(stateToSave);
 
-    return NextResponse.json({ success: true, taskCount: tasks.length, categoryCount: categories.length });
+    return NextResponse.json({ 
+      success: true, 
+      taskCount: tasks.length, 
+      categoryCount: categories.length,
+      hasWebhook: !!discordWebhookUrl
+    });
   } catch (error) {
     console.error("Error handling POST /api/tasks:", error);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
