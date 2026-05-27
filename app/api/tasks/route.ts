@@ -14,6 +14,9 @@ const DEFAULT_STATE: UserState = {
   categories: ["勉強用", "その他"],
   discordWebhookUrl: "",
   discordNotifyTime: "08:00",
+  disciplineScore: 0,
+  averageBedtime: "23:30",
+  taskVelocityPerHour: 60,
 };
 
 async function loadGuestState(): Promise<UserState> {
@@ -29,6 +32,9 @@ async function loadGuestState(): Promise<UserState> {
       categories: Array.isArray(parsed.categories) ? parsed.categories : DEFAULT_STATE.categories,
       discordWebhookUrl: parsed.discordWebhookUrl ?? "",
       discordNotifyTime: parsed.discordNotifyTime ?? "08:00",
+      disciplineScore: parsed.disciplineScore ?? 0,
+      averageBedtime: parsed.averageBedtime ?? "23:30",
+      taskVelocityPerHour: parsed.taskVelocityPerHour ?? 60,
     };
   } catch (e: any) {
     if (e.code === "ENOENT") return { ...DEFAULT_STATE };
@@ -70,6 +76,9 @@ export async function POST(request: Request) {
       categories: Array.isArray(body.categories) ? body.categories : DEFAULT_STATE.categories,
       discordWebhookUrl: typeof body.discordWebhookUrl === "string" ? body.discordWebhookUrl : "",
       discordNotifyTime: typeof body.discordNotifyTime === "string" ? body.discordNotifyTime : "08:00",
+      disciplineScore: typeof body.disciplineScore === "number" ? body.disciplineScore : 0,
+      averageBedtime: typeof body.averageBedtime === "string" ? body.averageBedtime : "23:30",
+      taskVelocityPerHour: typeof body.taskVelocityPerHour === "number" ? body.taskVelocityPerHour : 60,
     };
 
     const session = await getServerSession(authOptions);

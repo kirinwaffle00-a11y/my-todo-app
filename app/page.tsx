@@ -20,6 +20,13 @@ interface Task {
   notified?: boolean;
   gcalEventId?: string;   // Google Calendar event ID for auto-sync
   createdAt: number;
+  startedAt?: number;
+  estimatedMinutes?: number;
+  downgradeStatus?: "none" | "suggested" | "accepted";
+  downgradeSuggestions?: string[];
+  parentTaskId?: string;
+  notToDos?: { id: string; text: string; kept?: boolean }[];
+  penalty?: { type: "screen_time_lock" | "other"; targetApp?: string; status: "active" | "executed" | "cleared" };
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -42,6 +49,9 @@ export default function Home() {
   // ── Sync States ──
   const [tasks, setTasks] = useState<Task[]>([]);
   const [categories, setCategories] = useState<string[]>(["勉強用", "その他"]);
+  const [disciplineScore, setDisciplineScore] = useState(0);
+  const [averageBedtime, setAverageBedtime] = useState("23:30");
+  const [taskVelocityPerHour, setTaskVelocityPerHour] = useState(60);
 
   // ── Discord Notification States ──
   const [discordWebhookUrl, setDiscordWebhookUrl] = useState("");
@@ -49,6 +59,9 @@ export default function Home() {
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [isTestingDiscord, setIsTestingDiscord] = useState(false);
   const [testStatus, setTestStatus] = useState<null | "success" | "error">(null);
+  
+  // ── Toast Alert ──
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   // ── Timer Toggle ──
   const [timerOpen, setTimerOpen] = useState(true);
@@ -66,6 +79,10 @@ export default function Home() {
   const [editDueDate, setEditDueDate] = useState("");
   const [editDueTime, setEditDueTime] = useState("");
   const [editIsRoutine, setEditIsRoutine] = useState(false);
+  const [editEstimatedMinutes, setEditEstimatedMinutes] = useState<number | "">("");
+  const [editNotToDosText, setEditNotToDosText] = useState("");
+  const [editPenaltyType, setEditPenaltyType] = useState<"none" | "screen_time_lock" | "other">("none");
+  const [editPenaltyTarget, setEditPenaltyTarget] = useState("");
 
   // ── Form States ──
   const [inputText, setInputText] = useState("");
@@ -110,16 +127,26 @@ export default function Home() {
   const LS_LAST_WRITE = "focustodo_last_write";
   const LS_DISCORD_WEBHOOK = "focustodo_discord_webhook";
   const LS_DISCORD_TIME = "focustodo_discord_time";
+  const LS_DISCIPLINE = "focustodo_discipline";
+  const LS_BEDTIME = "focustodo_bedtime";
+  const LS_VELOCITY = "focustodo_velocity";
 
-  const loadFromLocalStorage = (): { tasks: Task[]; categories: string[]; lastWrite: number; discordWebhookUrl: string; discordNotifyTime: string } => {
+  const loadFromLocalStorage = (): { 
+    tasks: Task[]; categories: string[]; lastWrite: number; 
+    discordWebhookUrl: string; discordNotifyTime: string;
+    disciplineScore: number; averageBedtime: string; taskVelocityPerHour: number;
+  } => {
     try {
       const t = localStorage.getItem(LS_TASKS);
       const c = localStorage.getItem(LS_CATS);
       const w = localStorage.getItem(LS_LAST_WRITE);
       const dw = localStorage.getItem(LS_DISCORD_WEBHOOK) || "";
       const dt = localStorage.getItem(LS_DISCORD_TIME) || "08:00";
+      const disc = localStorage.getItem(LS_DISCIPLINE);
+      const bed = localStorage.getItem(LS_BEDTIME);
+      const vel = localStorage.getItem(LS_VELOCITY);
+      
       const rawTasks: Task[] = t ? JSON.parse(t) : [];
-      // Ensure all tasks have required fields (backward-compat migration)
       const migratedTasks = rawTasks.map((task: any) => ({
         priority: "medium" as Task["priority"],
         isRoutine: false,
@@ -131,13 +158,23 @@ export default function Home() {
         lastWrite: w ? Number(w) : 0,
         discordWebhookUrl: dw,
         discordNotifyTime: dt,
+        disciplineScore: disc ? Number(disc) : 0,
+        averageBedtime: bed || "23:30",
+        taskVelocityPerHour: vel ? Number(vel) : 60,
       };
     } catch {
-      return { tasks: [], categories: ["勉強用", "その他"], lastWrite: 0, discordWebhookUrl: "", discordNotifyTime: "08:00" };
+      return { 
+        tasks: [], categories: ["勉強用", "その他"], lastWrite: 0, 
+        discordWebhookUrl: "", discordNotifyTime: "08:00",
+        disciplineScore: 0, averageBedtime: "23:30", taskVelocityPerHour: 60 
+      };
     }
   };
 
-  const saveToLocalStorage = (t: Task[], c: string[], dw?: string, dt?: string) => {
+  const saveToLocalStorage = (
+    t: Task[], c: string[], dw?: string, dt?: string, 
+    disciplineScore?: number, averageBedtime?: string, taskVelocityPerHour?: number
+  ) => {
     try {
       const now = Date.now();
       localStorage.setItem(LS_TASKS, JSON.stringify(t));
@@ -145,6 +182,9 @@ export default function Home() {
       localStorage.setItem(LS_LAST_WRITE, String(now));
       if (dw !== undefined) localStorage.setItem(LS_DISCORD_WEBHOOK, dw);
       if (dt !== undefined) localStorage.setItem(LS_DISCORD_TIME, dt);
+      if (disciplineScore !== undefined) localStorage.setItem(LS_DISCIPLINE, String(disciplineScore));
+      if (averageBedtime !== undefined) localStorage.setItem(LS_BEDTIME, averageBedtime);
+      if (taskVelocityPerHour !== undefined) localStorage.setItem(LS_VELOCITY, String(taskVelocityPerHour));
     } catch { /* localStorage unavailable */ }
   };
 
@@ -184,6 +224,9 @@ export default function Home() {
       );
       const serverWebhook = data.discordWebhookUrl || "";
       const serverTime = data.discordNotifyTime || "08:00";
+      const serverDiscipline = data.disciplineScore || 0;
+      const serverBedtime = data.averageBedtime || "23:30";
+      const serverVelocity = data.taskVelocityPerHour || 60;
 
       const local = loadFromLocalStorage();
       if (serverTasks.length === 0 && local.tasks.length > 0) {
@@ -196,12 +239,18 @@ export default function Home() {
       const finalCats = useServer ? serverCats : local.categories;
       const finalWebhook = useServer ? serverWebhook : local.discordWebhookUrl;
       const finalTime = useServer ? serverTime : local.discordNotifyTime;
+      const finalDiscipline = useServer ? serverDiscipline : local.disciplineScore;
+      const finalBedtime = useServer ? serverBedtime : local.averageBedtime;
+      const finalVelocity = useServer ? serverVelocity : local.taskVelocityPerHour;
 
       setTasks(finalTasks);
       setCategories(finalCats);
       setDiscordWebhookUrl(finalWebhook);
       setDiscordNotifyTime(finalTime);
-      saveToLocalStorage(finalTasks, finalCats, finalWebhook, finalTime);
+      setDisciplineScore(finalDiscipline);
+      setAverageBedtime(finalBedtime);
+      setTaskVelocityPerHour(finalVelocity);
+      saveToLocalStorage(finalTasks, finalCats, finalWebhook, finalTime, finalDiscipline, finalBedtime, finalVelocity);
       lastLocalWrite.current = Date.now();
       if (!finalCats.includes(categoryRef.current) && finalCats.length > 0) {
         setCategory(finalCats[0]);
@@ -365,12 +414,50 @@ export default function Home() {
     return () => clearInterval(id);
   }, [tasks, categories]);
 
+  // ── Frustration Prediction Alert ──────────────────────────────────────────
+  useEffect(() => {
+    if (!isLoaded.current || tasks.length === 0) return;
+    
+    // Check risk on client side only once per session
+    if (typeof window !== "undefined" && !sessionStorage.getItem("frustration_alert_shown")) {
+      let maxRisk = 0;
+      const now = new Date();
+      const [bedH, bedM] = averageBedtime.split(":").map(Number);
+      const isLate = now.getHours() >= (bedH - 1 < 0 ? 23 : bedH - 1) || now.getHours() < 4;
+
+      tasks.forEach(t => {
+        if (t.completed) return;
+        let risk = 0;
+        if (disciplineScore < 50) risk += 10;
+        if (t.estimatedMinutes && t.estimatedMinutes >= 60) risk += 20;
+        const daysOld = (now.getTime() - t.createdAt) / (1000 * 60 * 60 * 24);
+        if (daysOld > 3) risk += 30;
+        if (isLate) risk += 40;
+
+        if (risk > maxRisk) maxRisk = risk;
+      });
+
+      if (maxRisk >= 70) {
+        setToastMessage("⚠️ 挫折リスクが高まっています。今日は軽めのタスク1つにして、早く寝ませんか？");
+        sessionStorage.setItem("frustration_alert_shown", "true");
+        setTimeout(() => setToastMessage(null), 8000);
+      }
+    }
+  }, [tasks, disciplineScore, averageBedtime]);
+
   // ── Save ──────────────────────────────────────────────────────────────────
-  const saveStateToServer = async (updatedTasks: Task[], updatedCategories: string[], dw?: string, dt?: string) => {
+  const saveStateToServer = async (
+    updatedTasks: Task[], updatedCategories: string[], 
+    dw?: string, dt?: string, disc?: number, bed?: string, vel?: number
+  ) => {
     lastLocalWrite.current = Date.now();
     const webhook = dw !== undefined ? dw : discordWebhookUrl;
     const notifyTime = dt !== undefined ? dt : discordNotifyTime;
-    saveToLocalStorage(updatedTasks, updatedCategories, webhook, notifyTime);
+    const finalDisc = disc !== undefined ? disc : disciplineScore;
+    const finalBed = bed !== undefined ? bed : averageBedtime;
+    const finalVel = vel !== undefined ? vel : taskVelocityPerHour;
+    
+    saveToLocalStorage(updatedTasks, updatedCategories, webhook, notifyTime, finalDisc, finalBed, finalVel);
     try {
       await fetch("/api/tasks", {
         method: "POST",
@@ -379,18 +466,27 @@ export default function Home() {
           tasks: updatedTasks, 
           categories: updatedCategories,
           discordWebhookUrl: webhook,
-          discordNotifyTime: notifyTime
+          discordNotifyTime: notifyTime,
+          disciplineScore: finalDisc,
+          averageBedtime: finalBed,
+          taskVelocityPerHour: finalVel
         }),
       });
     } catch { /* localStorage already saved */ }
   };
 
-  const updateState = (newTasks: Task[], newCategories: string[], dw?: string, dt?: string) => {
+  const updateState = (
+    newTasks: Task[], newCategories: string[], 
+    dw?: string, dt?: string, disc?: number, bed?: string, vel?: number
+  ) => {
     setTasks(newTasks);
     setCategories(newCategories);
     if (dw !== undefined) setDiscordWebhookUrl(dw);
     if (dt !== undefined) setDiscordNotifyTime(dt);
-    saveStateToServer(newTasks, newCategories, dw, dt);
+    if (disc !== undefined) setDisciplineScore(disc);
+    if (bed !== undefined) setAverageBedtime(bed);
+    if (vel !== undefined) setTaskVelocityPerHour(vel);
+    saveStateToServer(newTasks, newCategories, dw, dt, disc, bed, vel);
   };
 
   // ── Handlers ──────────────────────────────────────────────────────────────
@@ -540,12 +636,27 @@ export default function Home() {
     setEditDueDate(task.dueDate || "");
     setEditDueTime(task.dueTime || "");
     setEditIsRoutine(task.isRoutine);
+    setEditEstimatedMinutes(task.estimatedMinutes || "");
+    setEditNotToDosText(task.notToDos?.map(n => n.text).join("\n") || "");
+    setEditPenaltyType(task.penalty?.type || "none");
+    setEditPenaltyTarget(task.penalty?.targetApp || "");
   };
 
   const handleSaveEdit = () => {
     if (!editingTask) return;
     const trimmed = editText.trim();
     if (!trimmed) return;
+    const newNotToDos = editNotToDosText.trim() ? editNotToDosText.split("\n").filter(t => t.trim()).map((t, i) => {
+      const existing = editingTask.notToDos?.find(n => n.text === t.trim());
+      return existing || { id: Date.now().toString() + i, text: t.trim() };
+    }) : undefined;
+    
+    const newPenalty = editPenaltyType !== "none" ? {
+      type: editPenaltyType as "screen_time_lock" | "other",
+      targetApp: editPenaltyTarget,
+      status: editingTask.penalty?.status || "active" as const
+    } : undefined;
+
     const updated = tasks.map((t) =>
       t.id === editingTask.id
         ? {
@@ -558,12 +669,55 @@ export default function Home() {
             dueDate: editDueDate || undefined,
             dueTime: editDueTime || undefined,
             isRoutine: editIsRoutine,
+            estimatedMinutes: editEstimatedMinutes !== "" ? Number(editEstimatedMinutes) : undefined,
+            notToDos: newNotToDos,
+            penalty: newPenalty,
             notified: false,
           }
         : t
     );
     updateState(updated, categories);
     setEditingTask(null);
+  };
+
+  // ── Downgrade Features ────────────────────────────────────────────────────
+  const handleSuggestDowngrade = (taskId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const updated = tasks.map((t) => {
+      if (t.id === taskId) {
+        // Mock AI logic: Suggest smaller tasks based on the original task
+        const suggestions = [
+          "1分だけ関連するファイルを開く",
+          "最初の1行だけ書く",
+          "必要な資料をデスクに出すだけ"
+        ];
+        return { ...t, downgradeStatus: "suggested" as const, downgradeSuggestions: suggestions };
+      }
+      return t;
+    });
+    updateState(updated, categories);
+  };
+
+  const handleAcceptDowngrade = (taskId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const targetTask = tasks.find(t => t.id === taskId);
+    if (!targetTask || !targetTask.downgradeSuggestions) return;
+    
+    // Create new subtasks
+    const newTasks: Task[] = targetTask.downgradeSuggestions.map((s, idx) => ({
+      id: Date.now().toString() + idx,
+      text: `[極小ステップ] ${s}`,
+      category: targetTask.category,
+      priority: "medium", // Low barrier
+      isRoutine: false,
+      completed: false,
+      parentTaskId: targetTask.id,
+      createdAt: Date.now(),
+    }));
+
+    // Update parent task to "accepted"
+    const updated = tasks.map(t => t.id === taskId ? { ...t, downgradeStatus: "accepted" as const } : t);
+    updateState([...newTasks, ...updated], categories);
   };
 
   // ── Priority Accordion ────────────────────────────────────────────────────
@@ -760,6 +914,18 @@ export default function Home() {
                       </div>
 
                       <div className="task-action-btns">
+                        {/* Suggest Downgrade button */}
+                        {!task.completed && task.downgradeStatus !== "accepted" && (
+                          <button
+                            type="button"
+                            className="edit-btn"
+                            onClick={(e) => handleSuggestDowngrade(task.id, e)}
+                            title="ハードルが高い？ (極小ステップを提案)"
+                            style={{ fontSize: "16px", paddingBottom: "2px" }}
+                          >
+                            😫
+                          </button>
+                        )}
                         {/* Edit button */}
                         <button
                           type="button"
@@ -781,6 +947,45 @@ export default function Home() {
                         </button>
                       </div>
                     </div>
+
+                    {/* Downgrade Suggestions UI */}
+                    {!task.completed && task.downgradeStatus === "suggested" && task.downgradeSuggestions && (
+                      <div className="downgrade-suggestion-box" onClick={(e) => e.stopPropagation()} style={{
+                        background: "var(--bg)", margin: "0 12px 12px 12px", padding: "12px", borderRadius: "8px", border: "1px solid var(--border)"
+                      }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: "6px", marginBottom: "8px", color: "var(--primary)" }}>
+                          <span>💡</span>
+                          <span style={{ fontWeight: 600, fontSize: "14px" }}>AI提案: ハードルを下げてみませんか？</span>
+                        </div>
+                        <ul style={{ margin: "0 0 12px 0", paddingLeft: "20px", fontSize: "14px", color: "var(--text)" }}>
+                          {task.downgradeSuggestions.map((s, i) => (
+                            <li key={i}>{s}</li>
+                          ))}
+                        </ul>
+                        <div style={{ display: "flex", gap: "8px" }}>
+                          <button
+                            type="button"
+                            className="modal-save-btn"
+                            style={{ padding: "6px 12px", fontSize: "13px", height: "auto" }}
+                            onClick={(e) => handleAcceptDowngrade(task.id, e)}
+                          >
+                            提案を受け入れる
+                          </button>
+                          <button
+                            type="button"
+                            className="modal-cancel-btn"
+                            style={{ padding: "6px 12px", fontSize: "13px", height: "auto" }}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              const updated = tasks.map(t => t.id === task.id ? { ...t, downgradeStatus: "none" as const } : t);
+                              updateState(updated, categories);
+                            }}
+                          >
+                            閉じる
+                          </button>
+                        </div>
+                      </div>
+                    )}
 
                     {/* Expanded panel */}
                     {isExpanded && (
@@ -817,8 +1022,32 @@ export default function Home() {
 
   // ── Render ────────────────────────────────────────────────────────────────
 
+  // Compute active Not-ToDos for focus mode
+  const activeNotToDos = timerRunning && timerMode === "work"
+    ? tasks.filter(t => !t.completed && t.notToDos?.length).flatMap(t => t.notToDos!)
+    : [];
+
   return (
     <div className="app-container">
+      
+      {/* Toast Notification */}
+      {toastMessage && (
+        <div className="toast-alert" style={{
+          position: "fixed", top: "20px", left: "50%", transform: "translateX(-50%)",
+          background: "var(--danger)", color: "white", padding: "12px 24px",
+          borderRadius: "8px", zIndex: 10000, boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
+          animation: "modalFadeIn 0.3s ease", fontWeight: 500, fontSize: "15px",
+          display: "flex", alignItems: "center", gap: "8px"
+        }}>
+          {toastMessage}
+          <button 
+            type="button" 
+            onClick={() => setToastMessage(null)}
+            style={{ background: "transparent", border: "none", color: "white", cursor: "pointer", marginLeft: "8px", fontSize: "16px" }}
+          >×</button>
+        </div>
+      )}
+
       {/* Header */}
       <header className="header">
         <div className="header-top">
@@ -874,6 +1103,27 @@ export default function Home() {
             リマインダー通知を有効にしますか？
           </span>
           <button type="button" className="notif-btn" onClick={requestNotificationPermission}>通知を許可</button>
+        </div>
+      )}
+
+      {/* Behavioral Economics: Not-ToDos Banner during Focus Mode */}
+      {activeNotToDos.length > 0 && (
+        <div className="not-todo-banner" style={{
+          background: "linear-gradient(135deg, rgba(239,68,68,0.1), rgba(239,68,68,0.05))",
+          borderLeft: "4px solid var(--danger)",
+          padding: "16px",
+          borderRadius: "8px",
+          marginBottom: "16px",
+          animation: "modalFadeIn 0.5s ease"
+        }}>
+          <h3 style={{ margin: "0 0 8px 0", color: "var(--danger)", fontSize: "16px", display: "flex", alignItems: "center", gap: "8px" }}>
+            🚫 集中モード中: これだけはやらない！
+          </h3>
+          <ul style={{ margin: 0, paddingLeft: "24px", color: "var(--text-muted)", fontSize: "15px" }}>
+            {activeNotToDos.map((nt, idx) => (
+              <li key={nt.id || idx} style={{ marginBottom: "4px" }}>{nt.text}</li>
+            ))}
+          </ul>
         </div>
       )}
 
@@ -1316,6 +1566,64 @@ export default function Home() {
                       onChange={(e) => setEditDueTime(e.target.value)}
                     />
                   </div>
+                </div>
+              </div>
+
+              {/* Behavioral Economics Features */}
+              <div className="settings-form-group" style={{ marginTop: "8px" }}>
+                <label>行動経済学・サポート設定</label>
+                <div style={{ background: "var(--bg)", padding: "12px", borderRadius: "12px", display: "flex", flexDirection: "column", gap: "12px" }}>
+                  
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                    <span style={{ fontSize: "14px", color: "var(--text)" }}>⏱ 推定時間（分）:</span>
+                    <input 
+                      type="number" 
+                      className="todo-input"
+                      style={{ width: "80px", height: "32px", fontSize: "14px" }}
+                      min="1"
+                      placeholder="例: 30"
+                      value={editEstimatedMinutes}
+                      onChange={(e) => setEditEstimatedMinutes(e.target.value === "" ? "" : Number(e.target.value))}
+                    />
+                  </div>
+
+                  <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                    <span style={{ fontSize: "14px", color: "var(--text)" }}>🚫 集中時の Not-ToDo（1行1つ）:</span>
+                    <textarea
+                      className="todo-textarea"
+                      style={{ height: "60px", fontSize: "14px" }}
+                      placeholder="例: スマホを見ない&#10;YouTubeを開かない"
+                      value={editNotToDosText}
+                      onChange={(e) => setEditNotToDosText(e.target.value)}
+                    />
+                  </div>
+
+                  <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                    <span style={{ fontSize: "14px", color: "var(--text)" }}>⚡️ サボりペナルティ:</span>
+                    <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                      <select 
+                        className="todo-input" 
+                        style={{ height: "32px", fontSize: "14px", flex: 1, padding: "0 8px" }}
+                        value={editPenaltyType}
+                        onChange={(e) => setEditPenaltyType(e.target.value as any)}
+                      >
+                        <option value="none">なし</option>
+                        <option value="screen_time_lock">アプリのロック (Mock)</option>
+                        <option value="other">その他</option>
+                      </select>
+                      {editPenaltyType !== "none" && (
+                        <input 
+                          type="text" 
+                          className="todo-input"
+                          style={{ height: "32px", fontSize: "14px", flex: 1 }}
+                          placeholder="対象アプリ / 罰則内容"
+                          value={editPenaltyTarget}
+                          onChange={(e) => setEditPenaltyTarget(e.target.value)}
+                        />
+                      )}
+                    </div>
+                  </div>
+
                 </div>
               </div>
 

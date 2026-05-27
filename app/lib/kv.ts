@@ -9,12 +9,48 @@
 import fs from "fs/promises";
 import path from "path";
 
-// ── Types ────────────────────────────────────────────────────────────────────
+export interface NotToDo {
+  id: string;
+  text: string;
+  kept?: boolean;
+}
+
+export interface PenaltySetting {
+  type: "screen_time_lock" | "other";
+  targetApp?: string;
+  status: "active" | "executed" | "cleared";
+}
+
+export interface Task {
+  id: string;
+  text: string;
+  completed: boolean;
+  category: string;
+  priority?: "high" | "medium" | "low";
+  description?: string;
+  startDate?: string;
+  dueDate?: string;
+  dueTime?: string;
+  isRoutine: boolean;
+  createdAt: number;
+  startedAt?: number;
+  estimatedMinutes?: number;
+  downgradeStatus?: "none" | "suggested" | "accepted";
+  downgradeSuggestions?: string[];
+  parentTaskId?: string;
+  notToDos?: NotToDo[];
+  penalty?: PenaltySetting;
+  notified?: boolean; // Discord notified
+}
+
 export interface UserState {
-  tasks: any[];
+  tasks: Task[];
   categories: string[];
   discordWebhookUrl?: string;
   discordNotifyTime?: string;
+  disciplineScore: number;
+  averageBedtime: string;
+  taskVelocityPerHour: number;
 }
 
 const DEFAULT_STATE: UserState = {
@@ -22,6 +58,9 @@ const DEFAULT_STATE: UserState = {
   categories: ["勉強用", "その他"],
   discordWebhookUrl: "",
   discordNotifyTime: "08:00",
+  disciplineScore: 0,
+  averageBedtime: "23:30",
+  taskVelocityPerHour: 60,
 };
 
 // ── KV detection ─────────────────────────────────────────────────────────────
@@ -103,6 +142,9 @@ export async function getUserState(userId: string): Promise<UserState> {
       categories: Array.isArray(raw.categories) ? raw.categories : DEFAULT_STATE.categories,
       discordWebhookUrl: raw.discordWebhookUrl ?? "",
       discordNotifyTime: raw.discordNotifyTime ?? "08:00",
+      disciplineScore: raw.disciplineScore ?? 0,
+      averageBedtime: raw.averageBedtime ?? "23:30",
+      taskVelocityPerHour: raw.taskVelocityPerHour ?? 60,
     };
   } catch (e) {
     console.error("[kv] getUserState error:", e);
