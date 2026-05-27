@@ -1,103 +1,95 @@
 import { NextResponse } from "next/server";
+import { getServerSession } from "next-auth/next";
+import { authOptions } from "../../lib/authOptions";
+import { getUserState, setUserState, UserState } from "../../lib/kv";
 import fs from "fs/promises";
 import path from "path";
 
-// Define folder and file database paths
+// ── Legacy shared-file fallback (for guests / no-KV local dev) ──────────────
 const DATA_DIR = path.join(process.cwd(), "data");
-const FILE_PATH = path.join(DATA_DIR, "tasks.json");
+const GUEST_FILE = path.join(DATA_DIR, "tasks.json");
 
-// Structure of our unified sync state
-interface SyncState {
-  tasks: any[];
-  categories: string[];
-  discordWebhookUrl?: string;
-  discordNotifyTime?: string;
-}
-
-// Default state if tasks.json doesn't exist
-const DEFAULT_STATE: SyncState = {
+const DEFAULT_STATE: UserState = {
   tasks: [],
-  categories: ["勉強用", "その他"], // Default built-in categories
+  categories: ["勉強用", "その他"],
   discordWebhookUrl: "",
-  discordNotifyTime: "08:00"
+  discordNotifyTime: "08:00",
 };
 
-// Helper to safely read and auto-migrate tasks database schema
-async function loadState(): Promise<SyncState> {
+async function loadGuestState(): Promise<UserState> {
   try {
     await fs.mkdir(DATA_DIR, { recursive: true });
-    const fileContent = await fs.readFile(FILE_PATH, "utf-8");
-    const parsed = JSON.parse(fileContent);
-
-    // Auto-migration: if the existing file is just a legacy array of tasks
+    const content = await fs.readFile(GUEST_FILE, "utf-8");
+    const parsed = JSON.parse(content);
     if (Array.isArray(parsed)) {
-      return {
-        tasks: parsed,
-        categories: DEFAULT_STATE.categories,
-        discordWebhookUrl: DEFAULT_STATE.discordWebhookUrl,
-        discordNotifyTime: DEFAULT_STATE.discordNotifyTime,
-      };
+      return { ...DEFAULT_STATE, tasks: parsed };
     }
-
-    // Standard schema validation
     return {
       tasks: Array.isArray(parsed.tasks) ? parsed.tasks : [],
       categories: Array.isArray(parsed.categories) ? parsed.categories : DEFAULT_STATE.categories,
-      discordWebhookUrl: typeof parsed.discordWebhookUrl === "string" ? parsed.discordWebhookUrl : DEFAULT_STATE.discordWebhookUrl,
-      discordNotifyTime: typeof parsed.discordNotifyTime === "string" ? parsed.discordNotifyTime : DEFAULT_STATE.discordNotifyTime,
+      discordWebhookUrl: parsed.discordWebhookUrl ?? "",
+      discordNotifyTime: parsed.discordNotifyTime ?? "08:00",
     };
-  } catch (error: any) {
-    if (error.code === "ENOENT") {
-      return DEFAULT_STATE;
-    }
-    console.error("Error reading tasks.json, resetting to default state:", error);
-    return DEFAULT_STATE;
+  } catch (e: any) {
+    if (e.code === "ENOENT") return { ...DEFAULT_STATE };
+    console.error("[tasks/route] loadGuestState error:", e);
+    return { ...DEFAULT_STATE };
   }
 }
 
-// Helper to safely save state
-async function saveState(state: SyncState): Promise<void> {
-  try {
-    await fs.mkdir(DATA_DIR, { recursive: true });
-    await fs.writeFile(FILE_PATH, JSON.stringify(state, null, 2), "utf-8");
-  } catch (error) {
-    console.error("Error writing to tasks.json:", error);
-    throw error;
-  }
+async function saveGuestState(state: UserState): Promise<void> {
+  await fs.mkdir(DATA_DIR, { recursive: true });
+  await fs.writeFile(GUEST_FILE, JSON.stringify(state, null, 2), "utf-8");
 }
 
-// GET handler: Returns both the task list and categories list
-export async function GET() {
-  const state = await loadState();
+// ── GET ───────────────────────────────────────────────────────────────────────
+export async function GET(request: Request) {
+  const session = await getServerSession(authOptions);
+  const userId = (session as any)?.userId as string | undefined;
+
+  let state: UserState;
+  if (userId) {
+    state = await getUserState(userId);
+  } else {
+    state = await loadGuestState();
+  }
+
   return NextResponse.json(state);
 }
 
-// POST handler: Saves the updated tasks and categories state
+// ── POST ──────────────────────────────────────────────────────────────────────
 export async function POST(request: Request) {
   try {
-    const updatedState = await request.json();
-    
-    // Validate request structure
-    if (!updatedState || typeof updatedState !== "object") {
-      return NextResponse.json({ error: "Invalid state format" }, { status: 400 });
+    const body = await request.json();
+    if (!body || typeof body !== "object") {
+      return NextResponse.json({ error: "Invalid request body" }, { status: 400 });
     }
 
-    const tasks = Array.isArray(updatedState.tasks) ? updatedState.tasks : [];
-    const categories = Array.isArray(updatedState.categories) ? updatedState.categories : DEFAULT_STATE.categories;
-    const discordWebhookUrl = typeof updatedState.discordWebhookUrl === "string" ? updatedState.discordWebhookUrl : "";
-    const discordNotifyTime = typeof updatedState.discordNotifyTime === "string" ? updatedState.discordNotifyTime : "08:00";
+    const state: UserState = {
+      tasks: Array.isArray(body.tasks) ? body.tasks : [],
+      categories: Array.isArray(body.categories) ? body.categories : DEFAULT_STATE.categories,
+      discordWebhookUrl: typeof body.discordWebhookUrl === "string" ? body.discordWebhookUrl : "",
+      discordNotifyTime: typeof body.discordNotifyTime === "string" ? body.discordNotifyTime : "08:00",
+    };
 
-    const stateToSave: SyncState = { tasks, categories, discordWebhookUrl, discordNotifyTime };
-    await saveState(stateToSave);
+    const session = await getServerSession(authOptions);
+    const userId = (session as any)?.userId as string | undefined;
 
-    return NextResponse.json({ 
-      success: true, 
-      taskCount: tasks.length, 
-      categoryCount: categories.length,
-      hasWebhook: !!discordWebhookUrl
+    if (userId) {
+      await setUserState(userId, state);
+    } else {
+      await saveGuestState(state);
+    }
+
+    return NextResponse.json({
+      success: true,
+      taskCount: state.tasks.length,
+      categoryCount: state.categories.length,
+      hasWebhook: !!state.discordWebhookUrl,
+      userId: userId ?? "guest",
     });
-  } catch (error) {
-    console.error("Error handling POST /api/tasks:", error);
+  } catch (e) {
+    console.error("[tasks/route] POST error:", e);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }

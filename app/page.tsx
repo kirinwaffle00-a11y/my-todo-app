@@ -50,6 +50,23 @@ export default function Home() {
   const [isTestingDiscord, setIsTestingDiscord] = useState(false);
   const [testStatus, setTestStatus] = useState<null | "success" | "error">(null);
 
+  // ── Timer Toggle ──
+  const [timerOpen, setTimerOpen] = useState(true);
+
+  // ── Priority Accordion ──
+  const [collapsedPriorities, setCollapsedPriorities] = useState<Set<string>>(new Set());
+
+  // ── Task Edit Modal States ──
+  const [editingTask, setEditingTask] = useState<Task | null>(null);
+  const [editText, setEditText] = useState("");
+  const [editDescription, setEditDescription] = useState("");
+  const [editCategory, setEditCategory] = useState("勉強用");
+  const [editPriority, setEditPriority] = useState<Task["priority"]>("medium");
+  const [editStartDate, setEditStartDate] = useState("");
+  const [editDueDate, setEditDueDate] = useState("");
+  const [editDueTime, setEditDueTime] = useState("");
+  const [editIsRoutine, setEditIsRoutine] = useState(false);
+
   // ── Form States ──
   const [inputText, setInputText] = useState("");
   const [description, setDescription] = useState("");
@@ -511,6 +528,57 @@ export default function Home() {
     } catch { /* ignore */ }
   };
 
+  // ── Task Edit Handlers ────────────────────────────────────────────────────
+  const handleOpenEdit = (task: Task, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setEditingTask(task);
+    setEditText(task.text);
+    setEditDescription(task.description || "");
+    setEditCategory(task.category);
+    setEditPriority(task.priority ?? "medium");
+    setEditStartDate(task.startDate || "");
+    setEditDueDate(task.dueDate || "");
+    setEditDueTime(task.dueTime || "");
+    setEditIsRoutine(task.isRoutine);
+  };
+
+  const handleSaveEdit = () => {
+    if (!editingTask) return;
+    const trimmed = editText.trim();
+    if (!trimmed) return;
+    const updated = tasks.map((t) =>
+      t.id === editingTask.id
+        ? {
+            ...t,
+            text: trimmed,
+            description: editDescription.trim() || undefined,
+            category: editCategory,
+            priority: editPriority,
+            startDate: editStartDate || undefined,
+            dueDate: editDueDate || undefined,
+            dueTime: editDueTime || undefined,
+            isRoutine: editIsRoutine,
+            notified: false,
+          }
+        : t
+    );
+    updateState(updated, categories);
+    setEditingTask(null);
+  };
+
+  // ── Priority Accordion ────────────────────────────────────────────────────
+  const togglePriorityCollapse = (p: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setCollapsedPriorities((prev) => {
+      const next = new Set(prev);
+      if (next.has(p)) next.delete(p);
+      else next.add(p);
+      return next;
+    });
+  };
+
+
+
   // ── Google Calendar URL ───────────────────────────────────────────────────
   const getGoogleCalendarUrl = (task: Task) => {
     const title = encodeURIComponent(task.text);
@@ -603,137 +671,152 @@ export default function Home() {
     colorClass: string,
     sectionTasks: Task[]
   ) => {
+    const isCollapsed = collapsedPriorities.has(priority);
     return (
       <div className={`priority-section priority-section--${priority}`} key={priority}>
-        <div className="priority-section-header">
+        <div
+          className="priority-section-header priority-section-header--clickable"
+          onClick={(e) => togglePriorityCollapse(priority, e)}
+        >
           <div className="priority-section-title-wrap">
             <span className={`priority-section-dot priority-section-dot--${priority}`} />
             <h3 className="priority-section-title">{label}</h3>
           </div>
-          <span className="priority-section-count">
-            {sectionTasks.length}
-          </span>
+          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+            <span className="priority-section-count">{sectionTasks.length}</span>
+            <svg
+              width="14" height="14" viewBox="0 0 24 24" fill="none"
+              stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"
+              style={{
+                color: "var(--text-muted)",
+                transition: "transform 0.25s ease",
+                transform: isCollapsed ? "rotate(-90deg)" : "rotate(0deg)",
+                flexShrink: 0,
+              }}
+            >
+              <polyline points="6 9 12 15 18 9" />
+            </svg>
+          </div>
         </div>
 
-        <ul className="todo-list">
-          {sectionTasks.length > 0 ? (
-            sectionTasks.map((task) => {
-              const dateStatus = getDateStatus(task.dueDate, task.dueTime, task.completed);
-              const isExpanded = expandedTaskId === task.id;
-              return (
-                <li
-                  key={task.id}
-                  className={`todo-item priority-border--${task.priority ?? "medium"} ${task.completed ? "completed" : ""}`}
-                  onClick={() => setExpandedTaskId(isExpanded ? null : task.id)}
-                  id={`task-item-${task.id}`}
-                >
-                  <div className="todo-item-main-row">
-                    <div className="todo-item-left">
-                      {/* Checkbox */}
-                      <div className="custom-checkbox" onClick={(e) => { e.stopPropagation(); handleToggleComplete(task.id); }}>
-                        <svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12" /></svg>
-                      </div>
-
-                      <div className="todo-content-wrapper">
-                        <div className="todo-text-row">
-                          {/* Priority dot */}
-                          <PriorityDot p={task.priority ?? "medium"} />
-                          {/* Category badge */}
-                          <span className={`cat-badge ${task.category === "勉強用" ? "study" : "other"}`}>{task.category}</span>
-                          <span className="todo-text">{task.text}</span>
-                          {/* Routine indicator */}
-                          {task.isRoutine && <span title="毎日ルーティン" style={{ fontSize: "0.75rem" }}>🔁</span>}
-                          {/* Memo indicator */}
-                          {task.description && (
-                            <span className="has-desc-indicator" title="詳細メモあり">
-                              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                                <polyline points="14 2 14 8 20 8" />
-                                <line x1="16" y1="13" x2="8" y2="13" />
-                                <line x1="16" y1="17" x2="8" y2="17" />
-                              </svg>
-                            </span>
-                          )}
+        {!isCollapsed && (
+          <ul className="todo-list">
+            {sectionTasks.length > 0 ? (
+              sectionTasks.map((task) => {
+                const dateStatus = getDateStatus(task.dueDate, task.dueTime, task.completed);
+                const isExpanded = expandedTaskId === task.id;
+                return (
+                  <li
+                    key={task.id}
+                    className={`todo-item priority-border--${task.priority ?? "medium"} ${task.completed ? "completed" : ""}`}
+                    onClick={() => setExpandedTaskId(isExpanded ? null : task.id)}
+                    id={`task-item-${task.id}`}
+                  >
+                    <div className="todo-item-main-row">
+                      <div className="todo-item-left">
+                        {/* Checkbox */}
+                        <div className="custom-checkbox" onClick={(e) => { e.stopPropagation(); handleToggleComplete(task.id); }}>
+                          <svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12" /></svg>
                         </div>
-                        {(task.startDate || dateStatus.label) && (
-                          <div className="dates-row">
-                            {task.startDate && (
-                              <span className="date-badge">
-                                <svg viewBox="0 0 24 24" strokeWidth="2"><rect x="3" y="4" width="18" height="18" rx="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" /></svg>
-                                開始: {task.startDate.substring(5).replace("-", "/")}
-                              </span>
-                            )}
-                            {dateStatus.label && (
-                              <span className={`date-badge ${dateStatus.type}`}>
-                                <svg viewBox="0 0 24 24" strokeWidth="2.5"><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></svg>
-                                {dateStatus.label}
+
+                        <div className="todo-content-wrapper">
+                          <div className="todo-text-row">
+                            {/* Priority dot */}
+                            <PriorityDot p={task.priority ?? "medium"} />
+                            {/* Category badge */}
+                            <span className={`cat-badge ${task.category === "勉強用" ? "study" : "other"}`}>{task.category}</span>
+                            <span className="todo-text">{task.text}</span>
+                            {/* Routine indicator */}
+                            {task.isRoutine && <span title="毎日ルーティン" style={{ fontSize: "0.75rem" }}>🔁</span>}
+                            {/* Memo indicator */}
+                            {task.description && (
+                              <span className="has-desc-indicator" title="詳細メモあり">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                                  <polyline points="14 2 14 8 20 8" />
+                                  <line x1="16" y1="13" x2="8" y2="13" />
+                                  <line x1="16" y1="17" x2="8" y2="17" />
+                                </svg>
                               </span>
                             )}
                           </div>
-                        )}
-                      </div>
-                    </div>
-
-                    <button type="button" className="delete-btn" onClick={(e) => handleDeleteTask(task.id, e)} title="タスクを削除" id={`task-delete-btn-${task.id}`}>
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                        <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
-                      </svg>
-                    </button>
-                  </div>
-
-                  {/* Expanded panel */}
-                  {isExpanded && (
-                    <div className="todo-expanded-panel" onClick={(e) => e.stopPropagation()}>
-                      {/* Priority editor */}
-                      <div>
-                        <div className="todo-desc-label">優先度</div>
-                        <div className="priority-selector" style={{ marginTop: "6px" }}>
-                          {(["high", "medium", "low"] as Task["priority"][]).map((p) => (
-                            <button
-                              key={p}
-                              type="button"
-                              className={`priority-btn priority-btn--${p} ${(task.priority ?? "medium") === p ? "selected" : ""}`}
-                              onClick={() => {
-                                const updated = tasks.map((t) => t.id === task.id ? { ...t, priority: p } : t);
-                                updateState(updated, categories);
-                              }}
-                            >
-                              <span className={`priority-dot priority-dot--${p}`} />
-                              {PRIORITY_LABEL[p]}
-                            </button>
-                          ))}
+                          {(task.startDate || dateStatus.label) && (
+                            <div className="dates-row">
+                              {task.startDate && (
+                                <span className="date-badge">
+                                  <svg viewBox="0 0 24 24" strokeWidth="2"><rect x="3" y="4" width="18" height="18" rx="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" /></svg>
+                                  開始: {task.startDate.substring(5).replace("-", "/")}
+                                </span>
+                              )}
+                              {dateStatus.label && (
+                                <span className={`date-badge ${dateStatus.type}`}>
+                                  <svg viewBox="0 0 24 24" strokeWidth="2.5"><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></svg>
+                                  {dateStatus.label}
+                                </span>
+                              )}
+                            </div>
+                          )}
                         </div>
                       </div>
 
-                      <div className="todo-desc-label">具体的な詳細内容（メモ）</div>
-                      <div className="todo-desc-text">{task.description || "詳細メモはありません。"}</div>
-
-                      <a href={getGoogleCalendarUrl(task)} target="_blank" rel="noopener noreferrer" className="calendar-sync-btn">
-                        <svg viewBox="0 0 24 24" strokeWidth="2.5" strokeLinecap="round">
-                          <rect x="3" y="4" width="18" height="18" rx="2" />
-                          <line x1="16" y1="2" x2="16" y2="6" />
-                          <line x1="8" y1="2" x2="8" y2="6" />
-                          <line x1="3" y1="10" x2="21" y2="10" />
-                          <circle cx="12" cy="16" r="2" />
-                        </svg>
-                        Googleカレンダーに登録
-                      </a>
+                      <div className="task-action-btns">
+                        {/* Edit button */}
+                        <button
+                          type="button"
+                          className="edit-btn"
+                          onClick={(e) => handleOpenEdit(task, e)}
+                          title="タスクを編集"
+                          id={`task-edit-btn-${task.id}`}
+                        >
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                          </svg>
+                        </button>
+                        {/* Delete button */}
+                        <button type="button" className="delete-btn" onClick={(e) => handleDeleteTask(task.id, e)} title="タスクを削除" id={`task-delete-btn-${task.id}`}>
+                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                            <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+                          </svg>
+                        </button>
+                      </div>
                     </div>
-                  )}
-                </li>
-              );
-            })
-          ) : (
-            <div className="priority-empty-state">
-              <p>この優先度のタスクはありません。</p>
-            </div>
-          )}
-        </ul>
+
+                    {/* Expanded panel */}
+                    {isExpanded && (
+                      <div className="todo-expanded-panel" onClick={(e) => e.stopPropagation()}>
+                        <div className="todo-desc-label">具体的な詳細内容（メモ）</div>
+                        <div className="todo-desc-text">{task.description || "詳細メモはありません。"}</div>
+
+                        <a href={getGoogleCalendarUrl(task)} target="_blank" rel="noopener noreferrer" className="calendar-sync-btn">
+                          <svg viewBox="0 0 24 24" strokeWidth="2.5" strokeLinecap="round">
+                            <rect x="3" y="4" width="18" height="18" rx="2" />
+                            <line x1="16" y1="2" x2="16" y2="6" />
+                            <line x1="8" y1="2" x2="8" y2="6" />
+                            <line x1="3" y1="10" x2="21" y2="10" />
+                            <circle cx="12" cy="16" r="2" />
+                          </svg>
+                          Googleカレンダーに登録
+                        </a>
+                      </div>
+                    )}
+                  </li>
+                );
+              })
+            ) : (
+              <div className="priority-empty-state">
+                <p>この優先度のタスクはありません。</p>
+              </div>
+            )}
+          </ul>
+        )}
       </div>
     );
   };
 
+
   // ── Render ────────────────────────────────────────────────────────────────
+
   return (
     <div className="app-container">
       {/* Header */}
@@ -806,6 +889,24 @@ export default function Home() {
         </div>
       )}
 
+      {/* Guest mode banner */}
+      {!session && (
+        <div className="guest-banner">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" />
+          </svg>
+          <span>ゲストモードで利用中。<strong>Googleでログイン</strong>するとデバイスをまたいでデータが同期されます。</span>
+          <button
+            type="button"
+            className="notif-btn"
+            onClick={() => signIn("google", { callbackUrl: window.location.origin })}
+          >
+            ログイン
+          </button>
+        </div>
+      )}
+
+
       {/* 2-column grid */}
       <div className="app-grid">
 
@@ -814,113 +915,143 @@ export default function Home() {
 
           {/* ── Pomodoro Timer ── */}
           <div className="pomodoro-card">
-            <div className="pomodoro-header">
+            <div
+              className="pomodoro-header pomodoro-header--clickable"
+              onClick={() => setTimerOpen(!timerOpen)}
+              title={timerOpen ? "タイマーを折りたたむ" : "タイマーを開く"}
+            >
               <span className="pomodoro-title">
                 {timerMode === "work" ? "🍅 集中タイマー" : "☕ 休憩タイム"}
               </span>
-              <span className="pomodoro-cycles">完了: {timerCycles}セット</span>
-            </div>
-
-            {/* Circular progress ring */}
-            <div className="pomodoro-ring-wrap">
-              <svg className="pomodoro-ring" viewBox="0 0 100 100">
-                <circle cx="50" cy="50" r="44" className="pomodoro-ring-bg" />
-                <circle
-                  cx="50" cy="50" r="44"
-                  className={`pomodoro-ring-fg pomodoro-ring-fg--${timerMode}`}
-                  strokeDasharray={`${2 * Math.PI * 44}`}
-                  strokeDashoffset={`${2 * Math.PI * 44 * (1 - timerProgress)}`}
-                />
-              </svg>
-              <div className="pomodoro-time">
-                {String(timerMinutes).padStart(2, "0")}:{String(timerSecs).padStart(2, "0")}
+              <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                {!timerOpen && (
+                  <span className="pomodoro-collapsed-time">
+                    {String(timerMinutes).padStart(2, "0")}:{String(timerSecs).padStart(2, "0")}
+                    {timerRunning && <span className="pomodoro-running-dot" />}
+                  </span>
+                )}
+                <span className="pomodoro-cycles">完了: {timerCycles}セット</span>
+                <svg
+                  width="14" height="14" viewBox="0 0 24 24" fill="none"
+                  stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"
+                  style={{
+                    color: "var(--text-muted)",
+                    transition: "transform 0.3s ease",
+                    transform: timerOpen ? "rotate(0deg)" : "rotate(-90deg)",
+                    flexShrink: 0,
+                  }}
+                >
+                  <polyline points="6 9 12 15 18 9" />
+                </svg>
               </div>
             </div>
 
-            {/* Duration Settings */}
-            <div className={`timer-settings ${timerRunning ? "disabled" : ""}`}>
-              <div className="timer-settings-group">
-                <span className="timer-settings-label">🎯 集中時間:</span>
-                <div className="timer-presets-row">
-                  {[15, 25, 50].map((mins) => (
-                    <button
-                      key={mins}
-                      type="button"
-                      className={`timer-preset-btn timer-preset-btn--work ${workDuration === mins ? "active" : ""}`}
-                      onClick={() => updateWorkDuration(mins)}
-                      disabled={timerRunning}
-                    >
-                      {mins}分
-                    </button>
-                  ))}
-                  <div className="timer-custom-input-wrapper">
-                    <input
-                      type="number"
-                      min="1"
-                      max="180"
-                      value={workDuration || ""}
-                      onChange={(e) => {
-                        const val = parseInt(e.target.value, 10);
-                        updateWorkDuration(isNaN(val) ? 0 : val);
-                      }}
-                      onBlur={handleWorkDurationBlur}
-                      disabled={timerRunning}
-                      className="timer-custom-input"
-                      placeholder="カスタム"
+
+            {timerOpen && (
+              <>
+                {/* Circular progress ring */}
+                <div className="pomodoro-ring-wrap">
+                  <svg className="pomodoro-ring" viewBox="0 0 100 100">
+                    <circle cx="50" cy="50" r="44" className="pomodoro-ring-bg" />
+                    <circle
+                      cx="50" cy="50" r="44"
+                      className={`pomodoro-ring-fg pomodoro-ring-fg--${timerMode}`}
+                      strokeDasharray={`${2 * Math.PI * 44}`}
+                      strokeDashoffset={`${2 * Math.PI * 44 * (1 - timerProgress)}`}
                     />
-                    <span className="timer-custom-unit">分</span>
+                  </svg>
+                  <div className="pomodoro-time">
+                    {String(timerMinutes).padStart(2, "0")}:{String(timerSecs).padStart(2, "0")}
                   </div>
                 </div>
-              </div>
 
-              <div className="timer-settings-group">
-                <span className="timer-settings-label">☕ 休憩時間:</span>
-                <div className="timer-presets-row">
-                  {[5, 10, 15].map((mins) => (
-                    <button
-                      key={mins}
-                      type="button"
-                      className={`timer-preset-btn timer-preset-btn--break ${breakDuration === mins ? "active" : ""}`}
-                      onClick={() => updateBreakDuration(mins)}
-                      disabled={timerRunning}
-                    >
-                      {mins}分
-                    </button>
-                  ))}
-                  <div className="timer-custom-input-wrapper">
-                    <input
-                      type="number"
-                      min="1"
-                      max="60"
-                      value={breakDuration || ""}
-                      onChange={(e) => {
-                        const val = parseInt(e.target.value, 10);
-                        updateBreakDuration(isNaN(val) ? 0 : val);
-                      }}
-                      onBlur={handleBreakDurationBlur}
-                      disabled={timerRunning}
-                      className="timer-custom-input"
-                      placeholder="カスタム"
-                    />
-                    <span className="timer-custom-unit">分</span>
+                {/* Duration Settings */}
+                <div className={`timer-settings ${timerRunning ? "disabled" : ""}`}>
+                  <div className="timer-settings-group">
+                    <span className="timer-settings-label">🎯 集中時間:</span>
+                    <div className="timer-presets-row">
+                      {[15, 25, 50].map((mins) => (
+                        <button
+                          key={mins}
+                          type="button"
+                          className={`timer-preset-btn timer-preset-btn--work ${workDuration === mins ? "active" : ""}`}
+                          onClick={() => updateWorkDuration(mins)}
+                          disabled={timerRunning}
+                        >
+                          {mins}分
+                        </button>
+                      ))}
+                      <div className="timer-custom-input-wrapper">
+                        <input
+                          type="number"
+                          min="1"
+                          max="180"
+                          value={workDuration || ""}
+                          onChange={(e) => {
+                            const val = parseInt(e.target.value, 10);
+                            updateWorkDuration(isNaN(val) ? 0 : val);
+                          }}
+                          onBlur={handleWorkDurationBlur}
+                          disabled={timerRunning}
+                          className="timer-custom-input"
+                          placeholder="カスタム"
+                        />
+                        <span className="timer-custom-unit">分</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="timer-settings-group">
+                    <span className="timer-settings-label">☕ 休憩時間:</span>
+                    <div className="timer-presets-row">
+                      {[5, 10, 15].map((mins) => (
+                        <button
+                          key={mins}
+                          type="button"
+                          className={`timer-preset-btn timer-preset-btn--break ${breakDuration === mins ? "active" : ""}`}
+                          onClick={() => updateBreakDuration(mins)}
+                          disabled={timerRunning}
+                        >
+                          {mins}分
+                        </button>
+                      ))}
+                      <div className="timer-custom-input-wrapper">
+                        <input
+                          type="number"
+                          min="1"
+                          max="60"
+                          value={breakDuration || ""}
+                          onChange={(e) => {
+                            const val = parseInt(e.target.value, 10);
+                            updateBreakDuration(isNaN(val) ? 0 : val);
+                          }}
+                          onBlur={handleBreakDurationBlur}
+                          disabled={timerRunning}
+                          className="timer-custom-input"
+                          placeholder="カスタム"
+                        />
+                        <span className="timer-custom-unit">分</span>
+                      </div>
+                    </div>
                   </div>
                 </div>
-              </div>
-            </div>
 
-            <div className="pomodoro-controls">
-              <button
-                type="button"
-                className={`pomodoro-btn pomodoro-btn--main ${timerRunning ? "running" : ""}`}
-                onClick={() => setTimerRunning(!timerRunning)}
-              >
-                {timerRunning ? "⏸ 一時停止" : "▶ スタート"}
-              </button>
-              <button type="button" className="pomodoro-btn pomodoro-btn--reset" onClick={resetTimer}>
-                ↩ リセット
-              </button>
-            </div>
+                <div className="pomodoro-controls">
+                  <button
+                    type="button"
+                    className={`pomodoro-btn pomodoro-btn--main ${timerRunning ? "running" : ""}`}
+                    onClick={() => setTimerRunning(!timerRunning)}
+                  >
+                    {timerRunning ? "⏸ 一時停止" : "▶ スタート"}
+                  </button>
+                  <button type="button" className="pomodoro-btn pomodoro-btn--reset" onClick={resetTimer}>
+                    ↩ リセット
+                  </button>
+                </div>
+              </>
+            )}
           </div>
+
 
           {/* ── Add Task Form ── */}
           <form onSubmit={handleAddTask} className="todo-form">
@@ -1110,7 +1241,151 @@ export default function Home() {
         <p>© 2026 FocusTodo. Securely Connected.</p>
       </footer>
 
+      {/* ── Task Edit Modal ── */}
+      {editingTask && (
+        <div className="modal-overlay" onClick={() => setEditingTask(null)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>✏️ タスクを編集</h2>
+              <button type="button" className="close-x-btn" onClick={() => setEditingTask(null)}>✕</button>
+            </div>
+
+            <div className="modal-body" style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+              {/* Task name */}
+              <div className="settings-form-group">
+                <label htmlFor="edit-task-title">タスク名</label>
+                <input
+                  type="text"
+                  id="edit-task-title"
+                  className="todo-input"
+                  style={{ fontSize: "0.95rem", height: "44px" }}
+                  value={editText}
+                  onChange={(e) => setEditText(e.target.value)}
+                  maxLength={100}
+                  autoFocus
+                />
+              </div>
+
+              {/* Priority */}
+              <div className="settings-form-group">
+                <label>優先度</label>
+                <div className="priority-selector" style={{ marginTop: "4px" }}>
+                  {(["high", "medium", "low"] as Task["priority"][]).map((p) => (
+                    <button
+                      key={p}
+                      type="button"
+                      className={`priority-btn priority-btn--${p} ${editPriority === p ? "selected" : ""}`}
+                      onClick={() => setEditPriority(p)}
+                    >
+                      <span className={`priority-dot priority-dot--${p}`} />
+                      {PRIORITY_LABEL[p]}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Category */}
+              <div className="settings-form-group">
+                <label>カテゴリー</label>
+                <div className="category-select-container" style={{ flexWrap: "wrap", gap: "8px", marginTop: "4px" }}>
+                  {safeCategories.map((cat) => (
+                    <button
+                      key={cat}
+                      type="button"
+                      className={`category-select-btn ${editCategory === cat ? "selected study" : ""}`}
+                      onClick={() => setEditCategory(cat)}
+                    >
+                      {cat}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Description */}
+              <div className="settings-form-group">
+                <label htmlFor="edit-task-desc">詳細メモ</label>
+                <textarea
+                  id="edit-task-desc"
+                  className="todo-textarea"
+                  style={{ height: "80px" }}
+                  placeholder="詳細・手順などを入力..."
+                  value={editDescription}
+                  onChange={(e) => setEditDescription(e.target.value)}
+                  maxLength={500}
+                />
+              </div>
+
+              {/* Dates */}
+              <div className="option-row">
+                <div className="settings-form-group">
+                  <label htmlFor="edit-start-date">開始日</label>
+                  <input
+                    type="date"
+                    id="edit-start-date"
+                    className="date-input"
+                    value={editStartDate}
+                    onChange={(e) => setEditStartDate(e.target.value)}
+                  />
+                </div>
+                <div className="settings-form-group">
+                  <label htmlFor="edit-due-date">締切日</label>
+                  <div style={{ display: "flex", gap: "6px" }}>
+                    <input
+                      type="date"
+                      id="edit-due-date"
+                      className="date-input"
+                      value={editDueDate}
+                      onChange={(e) => setEditDueDate(e.target.value)}
+                    />
+                    <input
+                      type="time"
+                      className="date-input"
+                      style={{ width: "80px" }}
+                      value={editDueTime}
+                      onChange={(e) => setEditDueTime(e.target.value)}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Routine toggle */}
+              <label className="routine-toggle">
+                <input
+                  type="checkbox"
+                  checked={editIsRoutine}
+                  onChange={(e) => setEditIsRoutine(e.target.checked)}
+                  className="routine-checkbox"
+                />
+                <span className="routine-toggle-track">
+                  <span className="routine-toggle-thumb" />
+                </span>
+                <span className="routine-label">🔁 毎日繰り返す</span>
+              </label>
+            </div>
+
+            <div className="modal-footer">
+              <button
+                type="button"
+                className="modal-save-btn"
+                onClick={handleSaveEdit}
+                disabled={!editText.trim()}
+              >
+                変更を保存
+              </button>
+              <button
+                type="button"
+                className="modal-cancel-btn"
+                onClick={() => setEditingTask(null)}
+              >
+                キャンセル
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── Settings Modal (Glassmorphism) ── */}
+
       {showSettingsModal && (
         <div className="modal-overlay" onClick={() => {
           const local = loadFromLocalStorage();
