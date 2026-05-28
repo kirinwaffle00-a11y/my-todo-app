@@ -700,7 +700,16 @@ export default function Home() {
         body: JSON.stringify({ taskText: targetTask.text }),
       });
 
-      if (!res.ok) throw new Error(`API error: ${res.status}`);
+      if (!res.ok) {
+        let errDetail = `API error: ${res.status}`;
+        try {
+          const errData = await res.json();
+          if (errData && errData.error) {
+            errDetail = `${errDetail} - ${errData.error}`;
+          }
+        } catch { /* ignore */ }
+        throw new Error(errDetail);
+      }
       const data = await res.json();
       const suggestions: string[] = Array.isArray(data.suggestions) ? data.suggestions : [];
 
@@ -710,7 +719,8 @@ export default function Home() {
           : t
       );
       updateState(updated, categories);
-    } catch {
+    } catch (error) {
+      console.error("Failed to suggest downgrade via Gemini API:", error);
       // エラー時はフォールバック提案を使用
       const fallback = [
         "1分だけ関連するファイルを開く",

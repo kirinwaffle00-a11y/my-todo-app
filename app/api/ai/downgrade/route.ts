@@ -81,9 +81,14 @@ export async function POST(request: Request) {
     });
 
     if (!res.ok) {
-      // APIキー等の詳細はログのみ。クライアントには汎用エラーを返す
-      logger.error({ action: "ai/downgrade", status: "error", userId, detail: `Gemini API ${res.status}` });
-      return NextResponse.json({ error: "AI service temporarily unavailable" }, { status: 502 });
+      let geminiErrBody: unknown = null;
+      try { geminiErrBody = await res.json(); } catch { /* ignore */ }
+      // デバッグ用：Gemini API の詳細エラーを一時的に返す（診断後に削除）
+      logger.error({ action: "ai/downgrade", status: "error", userId, detail: `Gemini API ${res.status}`, geminiError: geminiErrBody });
+      return NextResponse.json(
+        { error: "AI service temporarily unavailable", _debug_gemini_status: res.status, _debug_gemini_error: geminiErrBody },
+        { status: 502 }
+      );
     }
 
     const geminiData = await res.json();
