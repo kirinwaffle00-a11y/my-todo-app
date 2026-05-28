@@ -2,12 +2,20 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "../../lib/authOptions";
 import { getUserState, setUserState, UserState } from "../../lib/kv";
+import { logger } from "../../lib/logger";
 import fs from "fs/promises";
 import path from "path";
 
-// ── Legacy shared-file fallback (for guests / no-KV local dev) ──────────────
+// ── ゲスト用フォールバック（ローカル開発 / KV 未設定時）─────────────────────
 const DATA_DIR = path.join(process.cwd(), "data");
 const GUEST_FILE = path.join(DATA_DIR, "tasks.json");
+
+// [H-3] データ量の上限定数
+const MAX_TASKS = 500;
+const MAX_CATEGORIES = 50;
+const MAX_TEXT_LEN = 200;
+const MAX_DESCRIPTION_LEN = 1000;
+const MAX_CATEGORY_LEN = 50;
 
 const DEFAULT_STATE: UserState = {
   tasks: [],
@@ -18,6 +26,17 @@ const DEFAULT_STATE: UserState = {
   averageBedtime: "23:30",
   taskVelocityPerHour: 60,
 };
+
+// [H-3] タスクの各フィールドを長さで切り詰める（データ爆発防止）
+function sanitizeTask(t: any): any {
+  if (!t || typeof t !== "object") return null;
+  return {
+    ...t,
+    text: typeof t.text === "string" ? t.text.slice(0, MAX_TEXT_LEN) : "",
+    description: typeof t.description === "string" ? t.description.slice(0, MAX_DESCRIPTION_LEN) : undefined,
+    category: typeof t.category === "string" ? t.category.slice(0, MAX_CATEGORY_LEN) : "その他",
+  };
+}
 
 async function loadGuestState(): Promise<UserState> {
   try {
@@ -38,7 +57,7 @@ async function loadGuestState(): Promise<UserState> {
     };
   } catch (e: any) {
     if (e.code === "ENOENT") return { ...DEFAULT_STATE };
-    console.error("[tasks/route] loadGuestState error:", e);
+    logger.error({ action: "tasks/loadGuestState", status: "error", detail: String(e) });
     return { ...DEFAULT_STATE };
   }
 }
@@ -49,7 +68,7 @@ async function saveGuestState(state: UserState): Promise<void> {
 }
 
 // ── GET ───────────────────────────────────────────────────────────────────────
-export async function GET(request: Request) {
+export async function GET() {
   const session = await getServerSession(authOptions);
   const userId = (session as any)?.userId as string | undefined;
 
@@ -57,48 +76,76 @@ export async function GET(request: Request) {
   if (userId) {
     state = await getUserState(userId);
   } else {
+    // [H-2] ゲスト状態の読み込みは許可（書き込みは認証必須）
     state = await loadGuestState();
   }
 
+  logger.info({ action: "tasks/GET", status: "success", userId: userId ?? "guest" });
   return NextResponse.json(state);
 }
 
 // ── POST ──────────────────────────────────────────────────────────────────────
 export async function POST(request: Request) {
+  // [H-2] POST（書き込み）は認証必須
+  const session = await getServerSession(authOptions);
+  const userId = (session as any)?.userId as string | undefined;
+
+  if (!userId) {
+    logger.warn({ action: "tasks/POST", status: "rejected", detail: "Unauthenticated write attempt" });
+    // ゲストは localStorage のみで管理するため、サーバー書き込みを拒否
+    // フロントエンドは 401 時もエラーを出さずローカルに保存する実装になっている
+    return NextResponse.json({ error: "Authentication required to save to server" }, { status: 401 });
+  }
+
   try {
     const body = await request.json();
     if (!body || typeof body !== "object") {
       return NextResponse.json({ error: "Invalid request body" }, { status: 400 });
     }
 
-    const state: UserState = {
-      tasks: Array.isArray(body.tasks) ? body.tasks : [],
-      categories: Array.isArray(body.categories) ? body.categories : DEFAULT_STATE.categories,
-      discordWebhookUrl: typeof body.discordWebhookUrl === "string" ? body.discordWebhookUrl : "",
-      discordNotifyTime: typeof body.discordNotifyTime === "string" ? body.discordNotifyTime : "08:00",
-      disciplineScore: typeof body.disciplineScore === "number" ? body.disciplineScore : 0,
-      averageBedtime: typeof body.averageBedtime === "string" ? body.averageBedtime : "23:30",
-      taskVelocityPerHour: typeof body.taskVelocityPerHour === "number" ? body.taskVelocityPerHour : 60,
-    };
-
-    const session = await getServerSession(authOptions);
-    const userId = (session as any)?.userId as string | undefined;
-
-    if (userId) {
-      await setUserState(userId, state);
-    } else {
-      await saveGuestState(state);
+    // [H-3] タスク件数・カテゴリ件数の上限チェック
+    const rawTasks = Array.isArray(body.tasks) ? body.tasks : [];
+    if (rawTasks.length > MAX_TASKS) {
+      logger.warn({ action: "tasks/POST", status: "rejected", userId, detail: `Task count exceeds limit: ${rawTasks.length}` });
+      return NextResponse.json({ error: `Task count exceeds maximum (${MAX_TASKS})` }, { status: 400 });
     }
 
+    const rawCats = Array.isArray(body.categories) ? body.categories : [];
+    if (rawCats.length > MAX_CATEGORIES) {
+      return NextResponse.json({ error: `Category count exceeds maximum (${MAX_CATEGORIES})` }, { status: 400 });
+    }
+
+    // [H-3] 各タスクフィールドのサニタイズ（長さ切り詰め）
+    const sanitizedTasks = rawTasks.map(sanitizeTask).filter(Boolean);
+
+    const state: UserState = {
+      tasks: sanitizedTasks,
+      categories: rawCats
+        .filter((c: any) => typeof c === "string")
+        .map((c: string) => c.slice(0, MAX_CATEGORY_LEN)),
+      discordWebhookUrl: typeof body.discordWebhookUrl === "string" ? body.discordWebhookUrl : "",
+      discordNotifyTime: typeof body.discordNotifyTime === "string" ? body.discordNotifyTime : "08:00",
+      disciplineScore: typeof body.disciplineScore === "number"
+        ? Math.max(0, Math.min(100, body.disciplineScore)) // 0-100 の範囲に制限
+        : 0,
+      averageBedtime: typeof body.averageBedtime === "string" ? body.averageBedtime : "23:30",
+      taskVelocityPerHour: typeof body.taskVelocityPerHour === "number"
+        ? Math.max(0, Math.min(1000, body.taskVelocityPerHour)) // 0-1000 の範囲に制限
+        : 60,
+    };
+
+    await setUserState(userId, state);
+
+    logger.info({ action: "tasks/POST", status: "success", userId, taskCount: state.tasks.length });
     return NextResponse.json({
       success: true,
       taskCount: state.tasks.length,
       categoryCount: state.categories.length,
-      hasWebhook: !!state.discordWebhookUrl,
-      userId: userId ?? "guest",
     });
+
   } catch (e) {
-    console.error("[tasks/route] POST error:", e);
+    // [M-3] 内部エラーはログのみ
+    logger.error({ action: "tasks/POST", status: "error", userId, detail: String(e) });
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }

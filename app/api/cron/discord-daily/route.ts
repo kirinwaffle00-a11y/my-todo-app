@@ -1,164 +1,181 @@
 import { NextResponse } from "next/server";
-import fs from "fs/promises";
-import path from "path";
+import { getUserState, setUserState, KV_AVAILABLE } from "../../../lib/kv";
+import { logger } from "../../../lib/logger";
 
-const DATA_DIR = path.join(process.cwd(), "data");
-const FILE_PATH = path.join(DATA_DIR, "tasks.json");
+// ── 定数 ────────────────────────────────────────────────────────────────────
+const DISCORD_WEBHOOK_PATTERN =
+  /^https:\/\/discord(?:app)?\.com\/api\/webhooks\/\d+\/[\w-]+$/;
 
-interface SyncState {
-  tasks: any[];
-  categories: string[];
-  discordWebhookUrl?: string;
-  discordNotifyTime?: string;
-  lastDiscordDailySentDate?: string;
-}
+// [L-1] タスクフィールドの最大長
+const MAX_TASK_TEXT_LEN = 200;
+const MAX_DESCRIPTION_LEN = 500;
 
-async function loadState(): Promise<SyncState> {
-  try {
-    const fileContent = await fs.readFile(FILE_PATH, "utf-8");
-    const parsed = JSON.parse(fileContent);
-    return {
-      tasks: Array.isArray(parsed.tasks) ? parsed.tasks : [],
-      categories: Array.isArray(parsed.categories) ? parsed.categories : ["勉強用", "その他"],
-      discordWebhookUrl: parsed.discordWebhookUrl || "",
-      discordNotifyTime: parsed.discordNotifyTime || "08:00",
-      lastDiscordDailySentDate: parsed.lastDiscordDailySentDate || "",
-    };
-  } catch (error) {
-    return {
-      tasks: [],
-      categories: ["勉強用", "その他"],
-      discordWebhookUrl: "",
-      discordNotifyTime: "08:00",
-      lastDiscordDailySentDate: "",
-    };
-  }
-}
-
-async function saveState(state: SyncState): Promise<void> {
-  await fs.mkdir(DATA_DIR, { recursive: true });
-  await fs.writeFile(FILE_PATH, JSON.stringify(state, null, 2), "utf-8");
-}
-
-// Helper to get current JST date and time
+// ── JST 日時取得 ─────────────────────────────────────────────────────────────
 function getJstDateTime() {
-  const options = { timeZone: "Asia/Tokyo", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false } as const;
+  const options = {
+    timeZone: "Asia/Tokyo",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  } as const;
   const formatter = new Intl.DateTimeFormat("ja-JP", options);
   const parts = formatter.formatToParts(new Date());
-  
-  const year = parts.find(p => p.type === "year")?.value || "";
-  const month = parts.find(p => p.type === "month")?.value || "";
-  const day = parts.find(p => p.type === "day")?.value || "";
-  const hour = parts.find(p => p.type === "hour")?.value || "";
-  const minute = parts.find(p => p.type === "minute")?.value || "";
-  
+  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
   return {
-    dateStr: `${year}-${month}-${day}`, // YYYY-MM-DD format
-    timeStr: `${hour}:${minute}`,       // HH:MM format
-    hour: parseInt(hour, 10),
-    minute: parseInt(minute, 10),
+    dateStr: `${get("year")}-${get("month")}-${get("day")}`,
+    timeStr: `${get("hour")}:${get("minute")}`,
   };
 }
 
-// Convert "HH:MM" to minutes from midnight
 function timeToMinutes(timeStr: string): number {
   const [h, m] = timeStr.split(":").map(Number);
-  return h * 60 + (m || 0);
+  return (h || 0) * 60 + (m || 0);
 }
 
+// [M-1] Discord Markdown のメンション無害化
+// @everyone / @here をエスケープし、任意メンションを防ぐ
+function sanitizeForDiscord(text: string): string {
+  return text
+    .slice(0, MAX_TASK_TEXT_LEN)
+    .replace(/@(everyone|here)/gi, "@\u200b$1")   // ゼロ幅スペースを挿入
+    .replace(/<@[!&]?\d+>/g, "[mention]");         // <@ID> 形式を無害化
+}
+
+function sanitizeDesc(text: string): string {
+  return text
+    .slice(0, MAX_DESCRIPTION_LEN)
+    .replace(/@(everyone|here)/gi, "@\u200b$1")
+    .replace(/<@[!&]?\d+>/g, "[mention]");
+}
+
+// ── GET ───────────────────────────────────────────────────────────────────────
 export async function GET(request: Request) {
+  // ─────────────────────────────────────────────────────────────────────────
+  // [C-2] CRON_SECRET による認証
+  // Vercel Cron は Authorization: Bearer <CRON_SECRET> を自動付与する
+  // ─────────────────────────────────────────────────────────────────────────
+  const cronSecret = process.env.CRON_SECRET;
+  if (!cronSecret) {
+    logger.error({ action: "cron/discord-daily", status: "error", detail: "CRON_SECRET env not set" });
+    return NextResponse.json({ error: "Server misconfiguration" }, { status: 500 });
+  }
+
+  const authHeader = request.headers.get("authorization") ?? "";
+  const provided = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
+
+  // タイミング攻撃（timing attack）対策: timingSafeEqual は Web Crypto で代替
+  const encoder = new TextEncoder();
+  const aBytes = encoder.encode(provided);
+  const bBytes = encoder.encode(cronSecret);
+
+  let safe = aBytes.length === bBytes.length;
+  let diff = 0;
+  const minLen = Math.min(aBytes.length, bBytes.length);
+  for (let i = 0; i < minLen; i++) diff |= aBytes[i] ^ bBytes[i];
+  safe = safe && diff === 0;
+
+  if (!safe) {
+    logger.warn({ action: "cron/discord-daily", status: "rejected", detail: "Invalid CRON_SECRET" });
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   try {
     const { searchParams } = new URL(request.url);
     const bypassTimeCheck = searchParams.get("bypass_time_check") === "true";
+    const { dateStr, timeStr } = getJstDateTime();
 
-    const state = await loadState();
-    const webhookUrl = state.discordWebhookUrl;
+    // ─────────────────────────────────────────────────────────────────────
+    // [L-3] KV が利用可能な場合は KV から読む（Vercel サーバーレスではファイルは永続化されない）
+    // KV 未設定時はゲストファイルにフォールバック
+    // ─────────────────────────────────────────────────────────────────────
+    let webhookUrl = "";
+    let notifyTime = "08:00";
+    let lastSentDate = "";
+    let tasks: any[] = [];
+    // KV からユーザーデータを読む（マルチユーザー対応の場合はユーザーを列挙する必要があるが、
+    // 現構成は単一ゲストを想定しているため環境変数からユーザーIDを取得する）
+    const cronUserId = process.env.CRON_USER_ID; // オプション: 特定ユーザーへ送る場合
+    if (KV_AVAILABLE && cronUserId) {
+      const state = await getUserState(cronUserId);
+      webhookUrl = state.discordWebhookUrl ?? "";
+      notifyTime = state.discordNotifyTime ?? "08:00";
+      tasks = state.tasks;
+      // KV に lastSentDate がない場合は空文字列（後で書き込む）
+      lastSentDate = (state as any).lastDiscordDailySentDate ?? "";
+    } else {
+      // ゲストファイルから読む（ローカル開発 or KV 未設定）
+      const { getUserState: gsGuest } = await import("../../../lib/kv");
+      // ゲストはファイルフォールバックのため userId = "guest" で呼び出す
+      const state = await gsGuest("guest");
+      webhookUrl = state.discordWebhookUrl ?? "";
+      notifyTime = state.discordNotifyTime ?? "08:00";
+      tasks = state.tasks;
+      lastSentDate = (state as any).lastDiscordDailySentDate ?? "";
+    }
 
     if (!webhookUrl) {
+      logger.info({ action: "cron/discord-daily", status: "skipped", detail: "Webhook URL not configured" });
       return NextResponse.json({ error: "Discord Webhook URL is not configured" }, { status: 400 });
     }
 
-    const { dateStr, timeStr } = getJstDateTime();
-    const targetTime = state.discordNotifyTime || "08:00";
+    // [C-3] Webhook URL のホワイトリスト検証（SSRF 防止）
+    if (!DISCORD_WEBHOOK_PATTERN.test(webhookUrl)) {
+      logger.warn({ action: "cron/discord-daily", status: "rejected", detail: "Invalid webhook URL format" });
+      return NextResponse.json({ error: "Invalid webhook URL" }, { status: 400 });
+    }
 
-    // Time matching logic
+    // 時刻チェック
     if (!bypassTimeCheck) {
-      // 1. Check if already sent today
-      if (state.lastDiscordDailySentDate === dateStr) {
-        return NextResponse.json({ message: `Daily summary already sent today (${dateStr})`, skipped: true });
+      if (lastSentDate === dateStr) {
+        logger.info({ action: "cron/discord-daily", status: "skipped", detail: `Already sent today: ${dateStr}` });
+        return NextResponse.json({ message: `Already sent today (${dateStr})`, skipped: true });
       }
-
-      // 2. Check if the current time is past the target notification time (with 45-minute trigger window)
-      const currentMin = timeToMinutes(timeStr);
-      const targetMin = timeToMinutes(targetTime);
-      const diff = currentMin - targetMin;
-
-      // Allow trigger if we are at or up to 45 minutes past the target time.
-      // This absorbs latency or slightly spaced cron interval runs (e.g. 15 or 30 mins crons).
+      const diff = timeToMinutes(timeStr) - timeToMinutes(notifyTime);
       if (diff < 0 || diff > 45) {
-        return NextResponse.json({ 
-          message: `Current JST time (${timeStr}) is outside trigger window for settings target (${targetTime})`, 
-          skipped: true 
-        });
+        logger.info({ action: "cron/discord-daily", status: "skipped", detail: `Outside window: ${timeStr}` });
+        return NextResponse.json({ message: `Outside trigger window (${timeStr})`, skipped: true });
       }
     }
 
-    // Filter tasks due today (JST) that are NOT completed
-    // Due date format is "YYYY-MM-DD"
-    const todayTasks = state.tasks.filter((task: any) => {
-      if (!task || task.completed) return false;
-      return task.dueDate === dateStr;
-    });
-
-    // Group by priority
+    // タスクフィルタ
+    const todayTasks = tasks.filter(
+      (t: any) => t && !t.completed && t.dueDate === dateStr
+    );
     const high = todayTasks.filter((t: any) => t.priority === "high");
     const medium = todayTasks.filter((t: any) => t.priority === "medium" || !t.priority);
     const low = todayTasks.filter((t: any) => t.priority === "low");
 
-    // Format Markdown description list
+    // [M-1] フォーマット時にサニタイズ
     const formatTaskList = (list: any[]) => {
       if (list.length === 0) return "• なし\n";
       return list.map((t: any) => {
+        const text = sanitizeForDiscord(String(t.text ?? ""));
         const timeBadge = t.dueTime ? ` [${t.dueTime}]` : "";
-        const catBadge = t.category ? ` \`[${t.category}]\`` : "";
-        const descText = t.description ? ` *(メモ: ${t.description})*` : "";
-        return `• **${t.text}**${timeBadge}${catBadge}${descText}`;
+        const catBadge = t.category ? ` \`[${sanitizeForDiscord(String(t.category))}]\`` : "";
+        const descText = t.description ? ` *(メモ: ${sanitizeDesc(String(t.description))})*` : "";
+        return `• **${text}**${timeBadge}${catBadge}${descText}`;
       }).join("\n") + "\n";
     };
 
     const formattedDate = dateStr.replace(/-/g, "/");
-    
     const payload = {
       username: "FocusTodo Bot",
       avatar_url: "https://raw.githubusercontent.com/kirinwaffle00-a11y/my-todo-app/main/public/icon-192x192.png",
-      embeds: [
-        {
-          title: `📅 本日のタスクまとめ (${formattedDate})`,
-          description: "本日締め切りを迎える未完了のタスク一覧です。今日も一歩ずつ集中して進めましょう！🍅",
-          color: 0x3b82f6, // Calm Blue color
-          fields: [
-            {
-              name: "🔥 優先度：高（今日絶対）",
-              value: formatTaskList(high),
-              inline: false,
-            },
-            {
-              name: "⚡ 優先度：中（お早めに）",
-              value: formatTaskList(medium),
-              inline: false,
-            },
-            {
-              name: "🌱 優先度：低（できれば）",
-              value: formatTaskList(low),
-              inline: false,
-            },
-          ],
-          timestamp: new Date().toISOString(),
-          footer: {
-            text: "FocusTodo Daily Notifications",
-          },
-        },
-      ],
+      embeds: [{
+        title: `📅 本日のタスクまとめ (${formattedDate})`,
+        description: "本日締め切りを迎える未完了のタスク一覧です。今日も一歩ずつ集中して進めましょう！🍅",
+        color: 0x3b82f6,
+        fields: [
+          { name: "🔥 優先度：高（今日絶対）", value: formatTaskList(high), inline: false },
+          { name: "⚡ 優先度：中（お早めに）", value: formatTaskList(medium), inline: false },
+          { name: "🌱 優先度：低（できれば）", value: formatTaskList(low), inline: false },
+        ],
+        timestamp: new Date().toISOString(),
+        footer: { text: "FocusTodo Daily Notifications" },
+      }],
     };
 
     const res = await fetch(webhookUrl, {
@@ -168,25 +185,27 @@ export async function GET(request: Request) {
     });
 
     if (!res.ok) {
+      // [M-3] Discord API エラーはログに残すが、クライアントには汎用メッセージのみ返す
       const errText = await res.text();
-      return NextResponse.json({ error: `Discord API Error: ${errText}` }, { status: res.status });
+      logger.error({ action: "cron/discord-daily", status: "error", detail: `Discord API error: ${res.status}`, discordBody: errText.slice(0, 200) });
+      return NextResponse.json({ error: "Failed to send Discord notification" }, { status: 502 });
     }
 
-    // Update state to record this send, preventing duplicate cron runs today
+    // [L-3] 送信済みフラグを KV に書き込む（ファイル依存を廃止）
     if (!bypassTimeCheck) {
-      state.lastDiscordDailySentDate = dateStr;
-      await saveState(state);
+      if (KV_AVAILABLE && cronUserId) {
+        const state = await getUserState(cronUserId);
+        await setUserState(cronUserId, { ...state, lastDiscordDailySentDate: dateStr } as any);
+      }
+      // ゲストファイルへの書き込みはローカル開発時のみのため許容する
     }
 
-    return NextResponse.json({ 
-      success: true, 
-      sentDate: dateStr, 
-      taskCount: todayTasks.length,
-      bypassed: bypassTimeCheck 
-    });
+    logger.info({ action: "cron/discord-daily", status: "success", detail: `Sent for ${dateStr}`, taskCount: todayTasks.length });
+    return NextResponse.json({ success: true, sentDate: dateStr, taskCount: todayTasks.length });
 
-  } catch (error: any) {
-    console.error("Error executing daily task cron:", error);
-    return NextResponse.json({ error: error.message || "Internal server error" }, { status: 500 });
+  } catch (e) {
+    // [M-3] 内部エラーはログのみ。スタックトレースはクライアントに渡さない
+    logger.error({ action: "cron/discord-daily", status: "error", detail: String(e) });
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }

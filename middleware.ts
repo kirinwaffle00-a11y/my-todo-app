@@ -3,7 +3,6 @@ import { NextResponse } from "next/server";
 
 export default withAuth(
   function middleware(req) {
-    // Allow all authenticated requests through
     return NextResponse.next();
   },
   {
@@ -16,9 +15,14 @@ export default withAuth(
   }
 );
 
-// Protect all pages except login page and API auth routes
+// [H-2] API ルートも含めてすべてのルートを認証必須にする。
+// 除外するのは:
+//   - NextAuth ハンドラ本体 (api/auth/...)
+//   - ログインページ
+//   - 静的アセット
+//   - Cron は CRON_SECRET で独自認証するため除外
 export const config = {
   matcher: [
-    "/((?!api/auth|login|_next/static|_next/image|favicon.ico).*)",
+    "/((?!api/auth|api/cron|login|_next/static|_next/image|favicon.ico|public).*)",
   ],
 };

@@ -39,3 +39,7 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# [H-1] ユーザーデータ・Webhook URL 漏洩防止
+# data/ ディレクトリには Discord Webhook URL やタスク内容が含まれるため Git 管理外にする
+/data/
