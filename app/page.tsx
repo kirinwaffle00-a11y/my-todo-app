@@ -22,7 +22,7 @@ interface Task {
   createdAt: number;
   startedAt?: number;
   estimatedMinutes?: number;
-  downgradeStatus?: "none" | "suggested" | "accepted";
+  downgradeStatus?: "none" | "loading" | "suggested" | "accepted";
   downgradeSuggestions?: string[];
   parentTaskId?: string;
   notToDos?: { id: string; text: string; kept?: boolean }[];
@@ -680,22 +680,50 @@ export default function Home() {
     setEditingTask(null);
   };
 
-  // ── Downgrade Features ────────────────────────────────────────────────────
-  const handleSuggestDowngrade = (taskId: string, e: React.MouseEvent) => {
+  // ── Downgrade Features (Gemini AI) ───────────────────────────────────────
+  const handleSuggestDowngrade = async (taskId: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    const updated = tasks.map((t) => {
-      if (t.id === taskId) {
-        // Mock AI logic: Suggest smaller tasks based on the original task
-        const suggestions = [
-          "1分だけ関連するファイルを開く",
-          "最初の1行だけ書く",
-          "必要な資料をデスクに出すだけ"
-        ];
-        return { ...t, downgradeStatus: "suggested" as const, downgradeSuggestions: suggestions };
-      }
-      return t;
-    });
-    updateState(updated, categories);
+
+    const targetTask = tasks.find(t => t.id === taskId);
+    if (!targetTask) return;
+
+    // ローディング状態を設定
+    const loading = tasks.map(t =>
+      t.id === taskId ? { ...t, downgradeStatus: "loading" as const } : t
+    );
+    updateState(loading, categories);
+
+    try {
+      const res = await fetch("/api/ai/downgrade", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ taskText: targetTask.text }),
+      });
+
+      if (!res.ok) throw new Error(`API error: ${res.status}`);
+      const data = await res.json();
+      const suggestions: string[] = Array.isArray(data.suggestions) ? data.suggestions : [];
+
+      const updated = tasks.map(t =>
+        t.id === taskId
+          ? { ...t, downgradeStatus: "suggested" as const, downgradeSuggestions: suggestions }
+          : t
+      );
+      updateState(updated, categories);
+    } catch {
+      // エラー時はフォールバック提案を使用
+      const fallback = [
+        "1分だけ関連するファイルを開く",
+        "最初の1行だけ書く",
+        "必要な資料を手元に出す",
+      ];
+      const updated = tasks.map(t =>
+        t.id === taskId
+          ? { ...t, downgradeStatus: "suggested" as const, downgradeSuggestions: fallback }
+          : t
+      );
+      updateState(updated, categories);
+    }
   };
 
   const handleAcceptDowngrade = (taskId: string, e: React.MouseEvent) => {
@@ -920,10 +948,11 @@ export default function Home() {
                             type="button"
                             className="edit-btn"
                             onClick={(e) => handleSuggestDowngrade(task.id, e)}
-                            title="ハードルが高い？ (極小ステップを提案)"
-                            style={{ fontSize: "16px", paddingBottom: "2px" }}
+                            title="ハードルが高い？ (Geminiが極小ステップを提案)"
+                            style={{ fontSize: "16px", paddingBottom: "2px", opacity: task.downgradeStatus === "loading" ? 0.5 : 1 }}
+                            disabled={task.downgradeStatus === "loading"}
                           >
-                            😫
+                            {task.downgradeStatus === "loading" ? "⏳" : "😫"}
                           </button>
                         )}
                         {/* Edit button */}
@@ -947,6 +976,17 @@ export default function Home() {
                         </button>
                       </div>
                     </div>
+
+                    {/* Downgrade Loading UI */}
+                    {!task.completed && task.downgradeStatus === "loading" && (
+                      <div onClick={(e) => e.stopPropagation()} style={{
+                        background: "var(--bg)", margin: "0 12px 12px 12px", padding: "12px", borderRadius: "8px",
+                        border: "1px solid var(--border)", display: "flex", alignItems: "center", gap: "8px", color: "var(--primary)"
+                      }}>
+                        <span style={{ animation: "spin 1s linear infinite", display: "inline-block" }}>⏳</span>
+                        <span style={{ fontSize: "14px", fontWeight: 500 }}>Geminiが極小ステップを考えています...</span>
+                      </div>
+                    )}
 
                     {/* Downgrade Suggestions UI */}
                     {!task.completed && task.downgradeStatus === "suggested" && task.downgradeSuggestions && (

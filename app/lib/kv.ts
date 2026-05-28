@@ -35,7 +35,7 @@ export interface Task {
   createdAt: number;
   startedAt?: number;
   estimatedMinutes?: number;
-  downgradeStatus?: "none" | "suggested" | "accepted";
+  downgradeStatus?: "none" | "loading" | "suggested" | "accepted";
   downgradeSuggestions?: string[];
   parentTaskId?: string;
   notToDos?: NotToDo[];
