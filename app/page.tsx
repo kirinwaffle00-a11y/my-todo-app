@@ -680,7 +680,7 @@ export default function Home() {
     setEditingTask(null);
   };
 
-  // ── Downgrade Features (Gemini AI) ───────────────────────────────────────
+  // ── Downgrade Features (AI) ───────────────────────────────────────
   const handleSuggestDowngrade = async (taskId: string, e: React.MouseEvent) => {
     e.stopPropagation();
 
@@ -720,7 +720,7 @@ export default function Home() {
       );
       updateState(updated, categories);
     } catch (error) {
-      console.error("Failed to suggest downgrade via Gemini API:", error);
+      console.error("Failed to suggest downgrade via AI API:", error);
       // エラー時はフォールバック提案を使用
       const fallback = [
         "1分だけ関連するファイルを開く",
@@ -958,7 +958,7 @@ export default function Home() {
                             type="button"
                             className="edit-btn"
                             onClick={(e) => handleSuggestDowngrade(task.id, e)}
-                            title="ハードルが高い？ (Geminiが極小ステップを提案)"
+                            title="ハードルが高い？ (AIが極小ステップを提案)"
                             style={{ fontSize: "16px", paddingBottom: "2px", opacity: task.downgradeStatus === "loading" ? 0.5 : 1 }}
                             disabled={task.downgradeStatus === "loading"}
                           >
@@ -994,7 +994,7 @@ export default function Home() {
                         border: "1px solid var(--border)", display: "flex", alignItems: "center", gap: "8px", color: "var(--primary)"
                       }}>
                         <span style={{ animation: "spin 1s linear infinite", display: "inline-block" }}>⏳</span>
-                        <span style={{ fontSize: "14px", fontWeight: 500 }}>Geminiが極小ステップを考えています...</span>
+                        <span style={{ fontSize: "14px", fontWeight: 500 }}>AIが極小ステップを考えています...</span>
                       </div>
                     )}
 
