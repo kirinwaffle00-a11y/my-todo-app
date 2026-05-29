@@ -6,7 +6,7 @@ import { logger } from "../../../lib/logger";
 // ── 定数 ────────────────────────────────────────────────────────────────────
 const MAX_TASK_TEXT_LEN = 200; // ユーザー入力の上限（プロンプトインジェクション抑止）
 const GEMINI_API_URL =
-  "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent";
+  "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent";
 
 export async function POST(request: Request) {
   // ── 認証チェック ────────────────────────────────────────────────────────
@@ -81,14 +81,9 @@ export async function POST(request: Request) {
     });
 
     if (!res.ok) {
-      let geminiErrBody: unknown = null;
-      try { geminiErrBody = await res.json(); } catch { /* ignore */ }
-      // デバッグ用：Gemini API の詳細エラーを一時的に返す（診断後に削除）
-      logger.error({ action: "ai/downgrade", status: "error", userId, detail: `Gemini API ${res.status}`, geminiError: geminiErrBody });
-      return NextResponse.json(
-        { error: "AI service temporarily unavailable", _debug_gemini_status: res.status, _debug_gemini_error: geminiErrBody },
-        { status: 502 }
-      );
+      // APIキー等の詳細はログのみ。クライアントには汎用エラーを返す
+      logger.error({ action: "ai/downgrade", status: "error", userId, detail: `Gemini API ${res.status}` });
+      return NextResponse.json({ error: "AI service temporarily unavailable" }, { status: 502 });
     }
 
     const geminiData = await res.json();
