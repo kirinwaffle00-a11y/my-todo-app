@@ -73,8 +73,10 @@ export async function POST(request: Request) {
     });
 
     if (!res.ok) {
-      logger.error({ action: "ai/downgrade", status: "error", userId, detail: `OpenAI API ${res.status}` });
-      return NextResponse.json({ error: "AI service temporarily unavailable" }, { status: 502 });
+      let openAiErrBody: unknown = null;
+      try { openAiErrBody = await res.json(); } catch { /* ignore */ }
+      logger.error({ action: "ai/downgrade", status: "error", userId, detail: `OpenAI API ${res.status}`, openAiError: openAiErrBody });
+      return NextResponse.json({ error: "AI service temporarily unavailable", _debug_openai_status: res.status, _debug_openai_error: openAiErrBody }, { status: 502 });
     }
 
     const openAiData = await res.json();
