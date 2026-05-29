@@ -23,6 +23,7 @@ export interface PenaltySetting {
 
 export interface Task {
   id: string;
+  parentId?: string;
   text: string;
   completed: boolean;
   category: string;

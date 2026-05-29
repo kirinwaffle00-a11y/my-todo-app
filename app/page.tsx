@@ -1,12 +1,13 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import { useSession, signOut } from "next-auth/react";
 import confetti from "canvas-confetti";
 
 // ── Task interface ──────────────────────────────────────────────────────────
 interface Task {
   id: string;
+  parentId?: string;
   text: string;
   description?: string;
   completed: boolean;
@@ -71,6 +72,7 @@ export default function Home() {
 
   // ── Task Edit Modal States ──
   const [editingTask, setEditingTask] = useState<Task | null>(null);
+  const [editParentId, setEditParentId] = useState<string | "">("");
   const [editText, setEditText] = useState("");
   const [editDescription, setEditDescription] = useState("");
   const [editCategory, setEditCategory] = useState("勉強用");
@@ -100,6 +102,17 @@ export default function Home() {
 
   // ── UI States ──
   const [expandedTaskId, setExpandedTaskId] = useState<string | null>(null);
+  const [collapsedTreeIds, setCollapsedTreeIds] = useState<Set<string>>(new Set());
+
+  const toggleTreeCollapse = (taskId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setCollapsedTreeIds(prev => {
+      const next = new Set(prev);
+      if (next.has(taskId)) next.delete(taskId);
+      else next.add(taskId);
+      return next;
+    });
+  };
   const [showOptions, setShowOptions] = useState(false);
   const [statusFilter, setStatusFilter] = useState<"all" | "active" | "completed">("all");
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
@@ -552,7 +565,7 @@ export default function Home() {
     const task = tasks.find((t) => t.id === id);
     const willComplete = task && !task.completed;
 
-    const updated = tasks.map((t) => {
+    let updated = tasks.map((t) => {
       if (t.id !== id) return t;
       const newCompleted = !t.completed;
       return {
@@ -561,6 +574,26 @@ export default function Home() {
         lastRoutineDate: newCompleted && t.isRoutine ? todayISO() : t.lastRoutineDate,
       };
     });
+
+    if (willComplete && task?.parentId) {
+      // Cascade completion to parents if all their children are completed
+      let currentParentId: string | undefined = task.parentId;
+      while (currentParentId) {
+        const pId: string = currentParentId;
+        const parent = updated.find(t => t.id === pId);
+        if (!parent || parent.completed) break;
+
+        const children = updated.filter(t => t.parentId === pId);
+        const allCompleted = children.length > 0 && children.every(c => c.completed);
+        
+        if (allCompleted) {
+          updated = updated.map(t => t.id === pId ? { ...t, completed: true, lastRoutineDate: t.isRoutine ? todayISO() : t.lastRoutineDate } : t);
+          currentParentId = parent.parentId;
+        } else {
+          break;
+        }
+      }
+    }
     updateState(updated, categories);
 
     // ── Auto-delete Google Calendar event on completion ──
@@ -631,6 +664,7 @@ export default function Home() {
   const handleOpenEdit = (task: Task, e: React.MouseEvent) => {
     e.stopPropagation();
     setEditingTask(task);
+    setEditParentId(task.parentId || "");
     setEditText(task.text);
     setEditDescription(task.description || "");
     setEditCategory(task.category);
@@ -665,6 +699,7 @@ export default function Home() {
         ? {
             ...t,
             text: trimmed,
+            parentId: editParentId || undefined,
             description: editDescription.trim() || undefined,
             category: editCategory,
             priority: editPriority,
@@ -860,6 +895,246 @@ export default function Home() {
   const mediumPriorityTasks = filteredTasks.filter((task) => (task.priority ?? "medium") === "medium");
   const lowPriorityTasks = filteredTasks.filter((task) => (task.priority ?? "medium") === "low");
 
+
+  const renderTaskNode = (task: Task, depth: number = 0): React.ReactNode => {
+    const isExpanded = expandedTaskId === task.id;
+    const dateStatus = getDateStatus(task.dueDate, task.dueTime, task.completed);
+    const children = safeTasks.filter((t) => t && t.parentId === task.id);
+    const hasChildren = children.length > 0;
+    const isTreeCollapsed = collapsedTreeIds.has(task.id);
+    
+    let progressText = "";
+    if (hasChildren) {
+      const completedChildren = children.filter(c => c && c.completed).length;
+      progressText = `${completedChildren}/${children.length}`;
+    }
+
+    return (
+      <React.Fragment key={task.id}>
+        <li
+          className={`todo-item priority-border--${task.priority ?? "medium"} ${task.completed ? "completed" : ""}`}
+          onClick={() => setExpandedTaskId(isExpanded ? null : task.id)}
+          id={`task-item-${task.id}`}
+        >
+          {/* We add a left border guide for nested items */}
+          <div className="todo-item-main-row" style={{ paddingLeft: `${depth * 28}px`, position: "relative" }}>
+            {depth > 0 && (
+              <div style={{ position: "absolute", left: `${(depth - 1) * 28 + 14}px`, top: 0, bottom: 0, width: "2px", background: "var(--border)", opacity: 0.5 }} />
+            )}
+            
+            {hasChildren ? (
+              <button 
+                onClick={(e) => toggleTreeCollapse(task.id, e)} 
+                className="tree-toggle-btn" 
+                style={{ 
+                  background: "transparent", border: "none", color: "var(--text-muted)", 
+                  cursor: "pointer", padding: "0 8px 0 0", fontSize: "12px", 
+                  display: "flex", alignItems: "center", justifyContent: "center", 
+                  transform: isTreeCollapsed ? "rotate(0deg)" : "rotate(90deg)", transition: "transform 0.2s" 
+                }}
+              >
+                ▶︎
+              </button>
+            ) : (
+              <div style={{ width: "20px" }} />
+            )}
+
+            <div className="todo-item-left">
+              {/* Checkbox */}
+              <div className="custom-checkbox" onClick={(e) => { e.stopPropagation(); handleToggleComplete(task.id); }}>
+                <svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12" /></svg>
+              </div>
+
+              <div className="todo-content-wrapper">
+                <div className="todo-text-row">
+                  {/* Priority dot */}
+                  <PriorityDot p={task.priority ?? "medium"} />
+                  {/* Category badge */}
+                  <span className={`cat-badge ${task.category === "勉強用" ? "study" : "other"}`}>{task.category}</span>
+                  <span className="todo-text">{task.text}</span>
+                  {hasChildren && (
+                    <span style={{ fontSize: "11px", background: "var(--bg)", border: "1px solid var(--border)", padding: "2px 6px", borderRadius: "10px", marginLeft: "6px", color: "var(--text-muted)", fontWeight: "bold" }}>
+                      {progressText}
+                    </span>
+                  )}
+                  {/* Routine indicator */}
+                  {task.isRoutine && <span title="毎日ルーティン" style={{ fontSize: "0.75rem" }}>🔁</span>}
+                  {/* Memo indicator */}
+                  {task.description && (
+                    <span className="has-desc-indicator" title="詳細メモあり">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                        <polyline points="14 2 14 8 20 8" />
+                        <line x1="16" y1="13" x2="8" y2="13" />
+                        <line x1="16" y1="17" x2="8" y2="17" />
+                      </svg>
+                    </span>
+                  )}
+                </div>
+                {(task.startDate || dateStatus.label) && (
+                  <div className="dates-row">
+                    {task.startDate && (
+                      <span className="date-badge">
+                        <svg viewBox="0 0 24 24" strokeWidth="2"><rect x="3" y="4" width="18" height="18" rx="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" /></svg>
+                        開始: {task.startDate.substring(5).replace("-", "/")}
+                      </span>
+                    )}
+                    {dateStatus.label && (
+                      <span className={`date-badge ${dateStatus.type}`}>
+                        <svg viewBox="0 0 24 24" strokeWidth="2.5"><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></svg>
+                        {dateStatus.label}
+                      </span>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="task-action-btns">
+              {/* Suggest Downgrade button */}
+              {!task.completed && task.downgradeStatus !== "accepted" && (
+                <button
+                  type="button"
+                  className="edit-btn"
+                  onClick={(e) => handleSuggestDowngrade(task.id, e)}
+                  title="ハードルが高い？ (AIが極小ステップを提案)"
+                  style={{ fontSize: "16px", paddingBottom: "2px", opacity: task.downgradeStatus === "loading" ? 0.5 : 1 }}
+                  disabled={task.downgradeStatus === "loading"}
+                >
+                  {task.downgradeStatus === "loading" ? "⏳" : "😫"}
+                </button>
+              )}
+              {/* Edit button */}
+              <button
+                type="button"
+                className="edit-btn"
+                onClick={(e) => handleOpenEdit(task, e)}
+                title="タスクを編集"
+                id={`task-edit-btn-${task.id}`}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                  <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                </svg>
+              </button>
+              {/* Delete button */}
+              <button type="button" className="delete-btn" onClick={(e) => handleDeleteTask(task.id, e)} title="タスクを削除" id={`task-delete-btn-${task.id}`}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+              </button>
+            </div>
+          </div>
+
+          {/* Downgrade Loading UI */}
+          {!task.completed && task.downgradeStatus === "loading" && (
+            <div onClick={(e) => e.stopPropagation()} style={{
+              background: "var(--bg)", margin: "0 12px 12px 12px", padding: "12px", borderRadius: "8px",
+              border: "1px solid var(--border)", display: "flex", alignItems: "center", gap: "8px", color: "var(--primary)"
+            }}>
+              <span style={{ animation: "spin 1s linear infinite", display: "inline-block" }}>⏳</span>
+              <span style={{ fontSize: "14px", fontWeight: 500 }}>AIが極小ステップを考えています...</span>
+            </div>
+          )}
+
+          {/* Downgrade Suggestions UI */}
+          {!task.completed && task.downgradeStatus === "suggested" && task.downgradeSuggestions && (
+            <div className="downgrade-suggestion-box" onClick={(e) => e.stopPropagation()} style={{
+              background: "var(--bg)", margin: "0 12px 12px 12px", padding: "12px", borderRadius: "8px", border: "1px solid var(--border)"
+            }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "6px", marginBottom: "8px", color: "var(--primary)" }}>
+                <span>💡</span>
+                <span style={{ fontWeight: 600, fontSize: "14px" }}>AI提案: ハードルを下げてみませんか？</span>
+              </div>
+              <ul style={{ margin: "0 0 12px 0", paddingLeft: "20px", fontSize: "14px", color: "var(--text)" }}>
+                {task.downgradeSuggestions.map((s, i) => (
+                  <li key={i}>{s}</li>
+                ))}
+              </ul>
+              <div style={{ display: "flex", gap: "8px" }}>
+                <button
+                  type="button"
+                  className="modal-save-btn"
+                  style={{ padding: "6px 12px", fontSize: "13px", height: "auto" }}
+                  onClick={(e) => handleAcceptDowngrade(task.id, e)}
+                >
+                  提案を受け入れる
+                </button>
+                <button
+                  type="button"
+                  className="modal-cancel-btn"
+                  style={{ padding: "6px 12px", fontSize: "13px", height: "auto" }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    const updated = tasks.map(t => t.id === task.id ? { ...t, downgradeStatus: "none" as const } : t);
+                    updateState(updated, categories);
+                  }}
+                >
+                  閉じる
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Expanded panel */}
+          {isExpanded && (
+            <div className="todo-expanded-panel" onClick={(e) => e.stopPropagation()}>
+              <div className="todo-desc-label">具体的な詳細内容（メモ）</div>
+              <div className="todo-desc-text">{task.description || "詳細メモはありません。"}</div>
+
+              <div style={{ display: "flex", alignItems: "center", gap: "12px", marginTop: "16px", flexWrap: "wrap" }}>
+                <a href={getGoogleCalendarUrl(task)} target="_blank" rel="noopener noreferrer" className="calendar-sync-btn">
+                  <svg viewBox="0 0 24 24" strokeWidth="2.5" strokeLinecap="round">
+                    <rect x="3" y="4" width="18" height="18" rx="2" />
+                    <line x1="16" y1="2" x2="16" y2="6" />
+                    <line x1="8" y1="2" x2="8" y2="6" />
+                    <line x1="3" y1="10" x2="21" y2="10" />
+                    <circle cx="12" cy="16" r="2" />
+                  </svg>
+                  カレンダーに登録
+                </a>
+                
+                <button 
+                  onClick={() => {
+                    // Open New Task input with this task as parent
+                    setEditParentId(task.id);
+                    // We can reuse edit modal, but let's just create a new task
+                    const tempTask = {
+                      id: Date.now().toString(),
+                      text: "新しい子タスク",
+                      completed: false,
+                      category: task.category,
+                      priority: task.priority,
+                      isRoutine: false,
+                      parentId: task.id,
+                      createdAt: Date.now()
+                    };
+                    setEditingTask(tempTask as Task);
+                    setEditText(tempTask.text);
+                    setEditDescription("");
+                    setEditCategory(tempTask.category);
+                    setEditPriority(tempTask.priority);
+                    setEditStartDate("");
+                    setEditDueDate("");
+                    setEditDueTime("");
+                    setEditIsRoutine(false);
+                  }}
+                  className="calendar-sync-btn" 
+                  style={{ background: "transparent", border: "1px solid var(--border)", color: "var(--text)" }}
+                >
+                  <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                  子タスクを追加
+                </button>
+              </div>
+            </div>
+          )}
+        </li>
+        {/* Render Children Recursively */}
+        {!isTreeCollapsed && hasChildren && children.map(child => renderTaskNode(child, depth + 1))}
+      </React.Fragment>
+    );
+  };
+
   const renderPrioritySection = (
     priority: "high" | "medium" | "low",
     label: string,
@@ -897,170 +1172,7 @@ export default function Home() {
         {!isCollapsed && (
           <ul className="todo-list">
             {sectionTasks.length > 0 ? (
-              sectionTasks.map((task) => {
-                const dateStatus = getDateStatus(task.dueDate, task.dueTime, task.completed);
-                const isExpanded = expandedTaskId === task.id;
-                return (
-                  <li
-                    key={task.id}
-                    className={`todo-item priority-border--${task.priority ?? "medium"} ${task.completed ? "completed" : ""}`}
-                    onClick={() => setExpandedTaskId(isExpanded ? null : task.id)}
-                    id={`task-item-${task.id}`}
-                  >
-                    <div className="todo-item-main-row">
-                      <div className="todo-item-left">
-                        {/* Checkbox */}
-                        <div className="custom-checkbox" onClick={(e) => { e.stopPropagation(); handleToggleComplete(task.id); }}>
-                          <svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12" /></svg>
-                        </div>
-
-                        <div className="todo-content-wrapper">
-                          <div className="todo-text-row">
-                            {/* Priority dot */}
-                            <PriorityDot p={task.priority ?? "medium"} />
-                            {/* Category badge */}
-                            <span className={`cat-badge ${task.category === "勉強用" ? "study" : "other"}`}>{task.category}</span>
-                            <span className="todo-text">{task.text}</span>
-                            {/* Routine indicator */}
-                            {task.isRoutine && <span title="毎日ルーティン" style={{ fontSize: "0.75rem" }}>🔁</span>}
-                            {/* Memo indicator */}
-                            {task.description && (
-                              <span className="has-desc-indicator" title="詳細メモあり">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                                  <polyline points="14 2 14 8 20 8" />
-                                  <line x1="16" y1="13" x2="8" y2="13" />
-                                  <line x1="16" y1="17" x2="8" y2="17" />
-                                </svg>
-                              </span>
-                            )}
-                          </div>
-                          {(task.startDate || dateStatus.label) && (
-                            <div className="dates-row">
-                              {task.startDate && (
-                                <span className="date-badge">
-                                  <svg viewBox="0 0 24 24" strokeWidth="2"><rect x="3" y="4" width="18" height="18" rx="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" /></svg>
-                                  開始: {task.startDate.substring(5).replace("-", "/")}
-                                </span>
-                              )}
-                              {dateStatus.label && (
-                                <span className={`date-badge ${dateStatus.type}`}>
-                                  <svg viewBox="0 0 24 24" strokeWidth="2.5"><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></svg>
-                                  {dateStatus.label}
-                                </span>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-
-                      <div className="task-action-btns">
-                        {/* Suggest Downgrade button */}
-                        {!task.completed && task.downgradeStatus !== "accepted" && (
-                          <button
-                            type="button"
-                            className="edit-btn"
-                            onClick={(e) => handleSuggestDowngrade(task.id, e)}
-                            title="ハードルが高い？ (AIが極小ステップを提案)"
-                            style={{ fontSize: "16px", paddingBottom: "2px", opacity: task.downgradeStatus === "loading" ? 0.5 : 1 }}
-                            disabled={task.downgradeStatus === "loading"}
-                          >
-                            {task.downgradeStatus === "loading" ? "⏳" : "😫"}
-                          </button>
-                        )}
-                        {/* Edit button */}
-                        <button
-                          type="button"
-                          className="edit-btn"
-                          onClick={(e) => handleOpenEdit(task, e)}
-                          title="タスクを編集"
-                          id={`task-edit-btn-${task.id}`}
-                        >
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-                            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
-                          </svg>
-                        </button>
-                        {/* Delete button */}
-                        <button type="button" className="delete-btn" onClick={(e) => handleDeleteTask(task.id, e)} title="タスクを削除" id={`task-delete-btn-${task.id}`}>
-                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                            <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
-                          </svg>
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Downgrade Loading UI */}
-                    {!task.completed && task.downgradeStatus === "loading" && (
-                      <div onClick={(e) => e.stopPropagation()} style={{
-                        background: "var(--bg)", margin: "0 12px 12px 12px", padding: "12px", borderRadius: "8px",
-                        border: "1px solid var(--border)", display: "flex", alignItems: "center", gap: "8px", color: "var(--primary)"
-                      }}>
-                        <span style={{ animation: "spin 1s linear infinite", display: "inline-block" }}>⏳</span>
-                        <span style={{ fontSize: "14px", fontWeight: 500 }}>AIが極小ステップを考えています...</span>
-                      </div>
-                    )}
-
-                    {/* Downgrade Suggestions UI */}
-                    {!task.completed && task.downgradeStatus === "suggested" && task.downgradeSuggestions && (
-                      <div className="downgrade-suggestion-box" onClick={(e) => e.stopPropagation()} style={{
-                        background: "var(--bg)", margin: "0 12px 12px 12px", padding: "12px", borderRadius: "8px", border: "1px solid var(--border)"
-                      }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: "6px", marginBottom: "8px", color: "var(--primary)" }}>
-                          <span>💡</span>
-                          <span style={{ fontWeight: 600, fontSize: "14px" }}>AI提案: ハードルを下げてみませんか？</span>
-                        </div>
-                        <ul style={{ margin: "0 0 12px 0", paddingLeft: "20px", fontSize: "14px", color: "var(--text)" }}>
-                          {task.downgradeSuggestions.map((s, i) => (
-                            <li key={i}>{s}</li>
-                          ))}
-                        </ul>
-                        <div style={{ display: "flex", gap: "8px" }}>
-                          <button
-                            type="button"
-                            className="modal-save-btn"
-                            style={{ padding: "6px 12px", fontSize: "13px", height: "auto" }}
-                            onClick={(e) => handleAcceptDowngrade(task.id, e)}
-                          >
-                            提案を受け入れる
-                          </button>
-                          <button
-                            type="button"
-                            className="modal-cancel-btn"
-                            style={{ padding: "6px 12px", fontSize: "13px", height: "auto" }}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              const updated = tasks.map(t => t.id === task.id ? { ...t, downgradeStatus: "none" as const } : t);
-                              updateState(updated, categories);
-                            }}
-                          >
-                            閉じる
-                          </button>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Expanded panel */}
-                    {isExpanded && (
-                      <div className="todo-expanded-panel" onClick={(e) => e.stopPropagation()}>
-                        <div className="todo-desc-label">具体的な詳細内容（メモ）</div>
-                        <div className="todo-desc-text">{task.description || "詳細メモはありません。"}</div>
-
-                        <a href={getGoogleCalendarUrl(task)} target="_blank" rel="noopener noreferrer" className="calendar-sync-btn">
-                          <svg viewBox="0 0 24 24" strokeWidth="2.5" strokeLinecap="round">
-                            <rect x="3" y="4" width="18" height="18" rx="2" />
-                            <line x1="16" y1="2" x2="16" y2="6" />
-                            <line x1="8" y1="2" x2="8" y2="6" />
-                            <line x1="3" y1="10" x2="21" y2="10" />
-                            <circle cx="12" cy="16" r="2" />
-                          </svg>
-                          Googleカレンダーに登録
-                        </a>
-                      </div>
-                    )}
-                  </li>
-                );
-              })
+              sectionTasks.filter(t => !t.parentId).map(task => renderTaskNode(task))
             ) : (
               <div className="priority-empty-state">
                 <p>この優先度のタスクはありません。</p>
