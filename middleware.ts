@@ -23,6 +23,6 @@ export default withAuth(
 //   - Cron は CRON_SECRET で独自認証するため除外
 export const config = {
   matcher: [
-    "/((?!api/auth|api/cron|login|_next/static|_next/image|favicon.ico|public).*)",
+    "/((?!api/auth|api/cron|api/ai|login|_next/static|_next/image|favicon.ico|public).*)",
   ],
 };
