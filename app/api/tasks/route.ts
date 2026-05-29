@@ -28,7 +28,7 @@ const DEFAULT_STATE: UserState = {
 };
 
 // [H-3] タスクの各フィールドを長さで切り詰める（データ爆発防止）
-function sanitizeTask(t: any): any {
+function sanitizeTask(t: Record<string, unknown>): Record<string, unknown> | null {
   if (!t || typeof t !== "object") return null;
   return {
     ...t,
@@ -55,22 +55,16 @@ async function loadGuestState(): Promise<UserState> {
       averageBedtime: parsed.averageBedtime ?? "23:30",
       taskVelocityPerHour: parsed.taskVelocityPerHour ?? 60,
     };
-  } catch (e: any) {
-    if (e.code === "ENOENT") return { ...DEFAULT_STATE };
+  } catch (e: unknown) {
+    if ((e as { code?: string })?.code === "ENOENT") return { ...DEFAULT_STATE };
     logger.error({ action: "tasks/loadGuestState", status: "error", detail: String(e) });
     return { ...DEFAULT_STATE };
   }
 }
-
-async function saveGuestState(state: UserState): Promise<void> {
-  await fs.mkdir(DATA_DIR, { recursive: true });
-  await fs.writeFile(GUEST_FILE, JSON.stringify(state, null, 2), "utf-8");
-}
-
 // ── GET ───────────────────────────────────────────────────────────────────────
 export async function GET() {
   const session = await getServerSession(authOptions);
-  const userId = (session as any)?.userId as string | undefined;
+  const userId = (session as { userId?: string; accessToken?: string })?.userId as string | undefined;
 
   let state: UserState;
   if (userId) {
@@ -88,7 +82,7 @@ export async function GET() {
 export async function POST(request: Request) {
   // [H-2] POST（書き込み）は認証必須
   const session = await getServerSession(authOptions);
-  const userId = (session as any)?.userId as string | undefined;
+  const userId = (session as { userId?: string; accessToken?: string })?.userId as string | undefined;
 
   if (!userId) {
     logger.warn({ action: "tasks/POST", status: "rejected", detail: "Unauthenticated write attempt" });
@@ -121,7 +115,7 @@ export async function POST(request: Request) {
     const state: UserState = {
       tasks: sanitizedTasks,
       categories: rawCats
-        .filter((c: any) => typeof c === "string")
+        .filter((c: unknown) => typeof c === "string")
         .map((c: string) => c.slice(0, MAX_CATEGORY_LEN)),
       discordWebhookUrl: typeof body.discordWebhookUrl === "string" ? body.discordWebhookUrl : "",
       discordNotifyTime: typeof body.discordNotifyTime === "string" ? body.discordNotifyTime : "08:00",

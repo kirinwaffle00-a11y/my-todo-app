@@ -7,7 +7,7 @@ const GCAL_API = "https://www.googleapis.com/calendar/v3/calendars/primary/event
 // ── POST: Create a Google Calendar event for a task ──────────────────────────
 export async function POST(request: Request) {
   const session = await getServerSession(authOptions);
-  const accessToken = (session as any)?.accessToken as string | undefined;
+  const accessToken = (session as { userId?: string; accessToken?: string })?.accessToken as string | undefined;
 
   if (!accessToken) {
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
@@ -72,7 +72,7 @@ export async function POST(request: Request) {
 // ── DELETE: Remove a Google Calendar event when task is completed ─────────────
 export async function DELETE(request: Request) {
   const session = await getServerSession(authOptions);
-  const accessToken = (session as any)?.accessToken as string | undefined;
+  const accessToken = (session as { userId?: string; accessToken?: string })?.accessToken as string | undefined;
 
   if (!accessToken) {
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 });

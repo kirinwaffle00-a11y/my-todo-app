@@ -51,6 +51,7 @@ export interface UserState {
   disciplineScore: number;
   averageBedtime: string;
   taskVelocityPerHour: number;
+  lastDiscordDailySentDate?: string;
 }
 
 const DEFAULT_STATE: UserState = {

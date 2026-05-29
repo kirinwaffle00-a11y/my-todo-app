@@ -14,7 +14,7 @@ export async function POST(request: Request) {
     logger.warn({ action: "discord/test", status: "rejected", detail: "Unauthenticated request" });
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  const userId = (session as any)?.userId ?? "unknown";
+  const userId = (session as { userId?: string; accessToken?: string })?.userId ?? "unknown";
 
   try {
     const body = await request.json();

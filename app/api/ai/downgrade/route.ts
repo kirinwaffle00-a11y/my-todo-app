@@ -14,7 +14,7 @@ export async function POST(request: Request) {
     logger.warn({ action: "ai/downgrade", status: "rejected", detail: "Unauthenticated" });
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  const userId = (session as any)?.userId ?? "unknown";
+  const userId = (session as { userId?: string; accessToken?: string })?.userId ?? "unknown";
 
   // ── APIキー存在確認 ─────────────────────────────────────────────────────
   const apiKey = process.env.OPENAI_API_KEY;

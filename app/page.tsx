@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { useSession, signIn, signOut } from "next-auth/react";
+import { useSession, signOut } from "next-auth/react";
 import confetti from "canvas-confetti";
 
 // ── Task interface ──────────────────────────────────────────────────────────
@@ -45,7 +45,7 @@ const PRIORITY_LABEL: Record<Task["priority"], string> = {
 export default function Home() {
   // ── Google OAuth session ──
   const { data: session } = useSession();
-  const gcalEnabled = !!(session as any)?.accessToken;
+  const gcalEnabled = !!(session as { accessToken?: string })?.accessToken;
   // ── Sync States ──
   const [tasks, setTasks] = useState<Task[]>([]);
   const [categories, setCategories] = useState<string[]>(["勉強用", "その他"]);
@@ -147,11 +147,11 @@ export default function Home() {
       const vel = localStorage.getItem(LS_VELOCITY);
       
       const rawTasks: Task[] = t ? JSON.parse(t) : [];
-      const migratedTasks = rawTasks.map((task: any) => ({
+      const migratedTasks = rawTasks.map((task: Partial<Task>) => ({
         priority: "medium" as Task["priority"],
         isRoutine: false,
         ...task,
-      }));
+      } as Task));
       return {
         tasks: migratedTasks,
         categories: c ? JSON.parse(c) : ["勉強用", "その他"],
@@ -213,12 +213,12 @@ export default function Home() {
       const data = await res.json();
       if (!data || typeof data !== "object") throw new Error("Invalid");
 
-      const serverTasks: Task[] = (data.tasks || []).map((task: any) => ({
+      const serverTasks: Task[] = (data.tasks || []).map((task: Partial<Task>) => ({
         priority: "medium" as Task["priority"],
         isRoutine: false,
         ...task,
         category: task.category === "study" ? "勉強用" : task.category === "other" ? "その他" : task.category,
-      }));
+      } as Task));
       const serverCats: string[] = (data.categories || ["勉強用", "その他"]).map((c: string) =>
         c === "study" ? "勉強用" : c === "other" ? "その他" : c
       );
@@ -269,6 +269,7 @@ export default function Home() {
     const local = loadFromLocalStorage();
     const restored = applyRoutineRestore(local.tasks);
     if (restored.length > 0 || local.categories.length > 0) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setTasks(restored);
       setCategories(local.categories);
     }
@@ -412,6 +413,7 @@ export default function Home() {
     };
     const id = setInterval(checkReminders, 10000);
     return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tasks, categories]);
 
   // ── Frustration Prediction Alert ──────────────────────────────────────────
@@ -422,7 +424,7 @@ export default function Home() {
     if (typeof window !== "undefined" && !sessionStorage.getItem("frustration_alert_shown")) {
       let maxRisk = 0;
       const now = new Date();
-      const [bedH, bedM] = averageBedtime.split(":").map(Number);
+      const [bedH] = averageBedtime.split(":").map(Number);
       const isLate = now.getHours() >= (bedH - 1 < 0 ? 23 : bedH - 1) || now.getHours() < 4;
 
       tasks.forEach(t => {
@@ -438,6 +440,7 @@ export default function Home() {
       });
 
       if (maxRisk >= 70) {
+        // eslint-disable-next-line react-hooks/set-state-in-effect
         setToastMessage("⚠️ 挫折リスクが高まっています。今日は軽めのタスク1つにして、早く寝ませんか？");
         sessionStorage.setItem("frustration_alert_shown", "true");
         setTimeout(() => setToastMessage(null), 8000);
@@ -446,10 +449,10 @@ export default function Home() {
   }, [tasks, disciplineScore, averageBedtime]);
 
   // ── Save ──────────────────────────────────────────────────────────────────
-  const saveStateToServer = async (
+  async function saveStateToServer(
     updatedTasks: Task[], updatedCategories: string[], 
     dw?: string, dt?: string, disc?: number, bed?: string, vel?: number
-  ) => {
+  ) {
     lastLocalWrite.current = Date.now();
     const webhook = dw !== undefined ? dw : discordWebhookUrl;
     const notifyTime = dt !== undefined ? dt : discordNotifyTime;
@@ -475,10 +478,10 @@ export default function Home() {
     } catch { /* localStorage already saved */ }
   };
 
-  const updateState = (
+  function updateState(
     newTasks: Task[], newCategories: string[], 
     dw?: string, dt?: string, disc?: number, bed?: string, vel?: number
-  ) => {
+  ) {
     setTasks(newTasks);
     setCategories(newCategories);
     if (dw !== undefined) setDiscordWebhookUrl(dw);
@@ -1655,7 +1658,7 @@ export default function Home() {
                         className="todo-input" 
                         style={{ height: "32px", fontSize: "14px", flex: 1, padding: "0 8px" }}
                         value={editPenaltyType}
-                        onChange={(e) => setEditPenaltyType(e.target.value as any)}
+                        onChange={(e) => setEditPenaltyType(e.target.value as "none" | "screen_time_lock" | "other")}
                       >
                         <option value="none">なし</option>
                         <option value="screen_time_lock">アプリのロック (Mock)</option>

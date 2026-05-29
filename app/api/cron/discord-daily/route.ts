@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getUserState, setUserState, KV_AVAILABLE } from "../../../lib/kv";
+import { getUserState, setUserState, KV_AVAILABLE, Task } from "../../../lib/kv";
 import { logger } from "../../../lib/logger";
 
 // ── 定数 ────────────────────────────────────────────────────────────────────
@@ -94,7 +94,7 @@ export async function GET(request: Request) {
     let webhookUrl = "";
     let notifyTime = "08:00";
     let lastSentDate = "";
-    let tasks: any[] = [];
+    let tasks: Task[] = [];
     // KV からユーザーデータを読む（マルチユーザー対応の場合はユーザーを列挙する必要があるが、
     // 現構成は単一ゲストを想定しているため環境変数からユーザーIDを取得する）
     const cronUserId = process.env.CRON_USER_ID; // オプション: 特定ユーザーへ送る場合
@@ -104,7 +104,7 @@ export async function GET(request: Request) {
       notifyTime = state.discordNotifyTime ?? "08:00";
       tasks = state.tasks;
       // KV に lastSentDate がない場合は空文字列（後で書き込む）
-      lastSentDate = (state as any).lastDiscordDailySentDate ?? "";
+      lastSentDate = state.lastDiscordDailySentDate ?? "";
     } else {
       // ゲストファイルから読む（ローカル開発 or KV 未設定）
       const { getUserState: gsGuest } = await import("../../../lib/kv");
@@ -113,7 +113,7 @@ export async function GET(request: Request) {
       webhookUrl = state.discordWebhookUrl ?? "";
       notifyTime = state.discordNotifyTime ?? "08:00";
       tasks = state.tasks;
-      lastSentDate = (state as any).lastDiscordDailySentDate ?? "";
+      lastSentDate = state.lastDiscordDailySentDate ?? "";
     }
 
     if (!webhookUrl) {
@@ -142,16 +142,16 @@ export async function GET(request: Request) {
 
     // タスクフィルタ
     const todayTasks = tasks.filter(
-      (t: any) => t && !t.completed && t.dueDate === dateStr
+      (t: Task) => t && !t.completed && t.dueDate === dateStr
     );
-    const high = todayTasks.filter((t: any) => t.priority === "high");
-    const medium = todayTasks.filter((t: any) => t.priority === "medium" || !t.priority);
-    const low = todayTasks.filter((t: any) => t.priority === "low");
+    const high = todayTasks.filter((t: Task) => t.priority === "high");
+    const medium = todayTasks.filter((t: Task) => t.priority === "medium" || !t.priority);
+    const low = todayTasks.filter((t: Task) => t.priority === "low");
 
     // [M-1] フォーマット時にサニタイズ
-    const formatTaskList = (list: any[]) => {
+    const formatTaskList = (list: Task[]) => {
       if (list.length === 0) return "• なし\n";
-      return list.map((t: any) => {
+      return list.map((t: Task) => {
         const text = sanitizeForDiscord(String(t.text ?? ""));
         const timeBadge = t.dueTime ? ` [${t.dueTime}]` : "";
         const catBadge = t.category ? ` \`[${sanitizeForDiscord(String(t.category))}]\`` : "";
@@ -195,7 +195,7 @@ export async function GET(request: Request) {
     if (!bypassTimeCheck) {
       if (KV_AVAILABLE && cronUserId) {
         const state = await getUserState(cronUserId);
-        await setUserState(cronUserId, { ...state, lastDiscordDailySentDate: dateStr } as any);
+        await setUserState(cronUserId, { ...state, lastDiscordDailySentDate: dateStr });
       }
       // ゲストファイルへの書き込みはローカル開発時のみのため許容する
     }

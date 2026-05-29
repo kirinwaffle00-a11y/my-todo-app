@@ -54,8 +54,8 @@ export const authOptions: AuthOptions = {
       // [M-4] accessToken はサーバーサイドのみで使用されるべきだが、
       // Google Calendar API 連携のためセッションに含める。
       // XSS 対策として httpOnly Cookie + NEXTAUTH_SECRET の JWT 署名で保護されている。
-      (session as any).accessToken = token.accessToken;
-      (session as any).userId = token.sub;
+      (session as { userId?: string; accessToken?: string }).accessToken = token.accessToken as string | undefined;
+      (session as { userId?: string; accessToken?: string }).userId = token.sub as string | undefined;
       return session;
     },
   },
