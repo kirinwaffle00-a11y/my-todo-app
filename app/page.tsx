@@ -826,25 +826,7 @@ export default function Home() {
       return t;
     });
 
-    if (willComplete && task?.parentId) {
-      // Cascade TRUE to parents if all their children are completed
-      let currentParentId: string | undefined = task.parentId;
-      while (currentParentId) {
-        const pId: string = currentParentId;
-        const parent = updated.find(t => t.id === pId);
-        if (!parent || parent.completed) break;
-
-        const children = updated.filter(t => t.parentId === pId);
-        const allCompleted = children.length > 0 && children.every(c => c.completed);
-        
-        if (allCompleted) {
-          updated = updated.map(t => t.id === pId ? { ...t, completed: true } : t);
-          currentParentId = parent.parentId;
-        } else {
-          break;
-        }
-      }
-    } else if (!willComplete && task?.parentId) {
+    if (!willComplete && task?.parentId) {
       // Cascade FALSE to all ancestors
       let currentParentId: string | undefined = task.parentId;
       while (currentParentId) {
