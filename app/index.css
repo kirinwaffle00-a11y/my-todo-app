@@ -1,0 +1,234 @@
+
+/* ── Mind Map View Styles ── */
+.mindmap-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background: rgba(8, 12, 23, 0.95);
+  backdrop-filter: blur(12px);
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  color: var(--text);
+  font-family: inherit;
+}
+
+.mindmap-header {
+  height: 60px;
+  padding: 0 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.03);
+  flex-shrink: 0;
+}
+
+.mindmap-title {
+  display: flex;
+  align-items: center;
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--primary);
+}
+
+.mindmap-close-btn {
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: var(--text);
+  padding: 8px 16px;
+  border-radius: 20px;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.mindmap-close-btn:hover {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.mindmap-container {
+  flex: 1;
+  overflow: auto;
+  padding: 40px;
+  /* hide scrollbars nicely if needed */
+}
+
+.mindmap-canvas {
+  display: inline-flex;
+  min-width: 100%;
+  min-height: 100%;
+  align-items: center;
+  justify-content: flex-start;
+  padding: 40px;
+}
+
+/* Recursive Node Layout */
+.mindmap-node-wrapper {
+  display: flex;
+  align-items: center;
+  position: relative;
+  margin: 12px 0;
+}
+
+.mindmap-node-content {
+  display: flex;
+  align-items: center;
+  position: relative;
+  z-index: 2;
+}
+
+.mindmap-node-card {
+  background: rgba(30, 41, 59, 0.8);
+  border: 1px solid var(--panel-border);
+  border-radius: 12px;
+  padding: 10px 16px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 160px;
+  max-width: 300px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+  transition: all 0.2s;
+}
+
+.mindmap-node-card:hover {
+  border-color: var(--primary);
+  transform: translateY(-2px);
+}
+
+.mindmap-checkbox {
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  border: 2px solid var(--text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 0.2s;
+}
+
+.mindmap-checkbox.completed {
+  background: var(--success);
+  border-color: var(--success);
+  color: white;
+}
+
+.mindmap-checkbox svg {
+  width: 12px;
+  height: 12px;
+  stroke: currentColor;
+  stroke-width: 3;
+  fill: none;
+}
+
+.mindmap-task-text {
+  font-size: 0.95rem;
+  line-height: 1.4;
+  cursor: text;
+  flex: 1;
+}
+
+.mindmap-task-text.completed-text {
+  text-decoration: line-through;
+  color: var(--text-muted);
+}
+
+.mindmap-add-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 1.2rem;
+  cursor: pointer;
+  padding: 0 4px;
+  transition: color 0.2s;
+}
+
+.mindmap-add-btn:hover {
+  color: var(--primary);
+}
+
+.mindmap-toggle-btn {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: 12px;
+  cursor: pointer;
+  font-size: 14px;
+  z-index: 3;
+  transition: all 0.2s;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+}
+
+.mindmap-toggle-btn:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.mindmap-children-column {
+  display: flex;
+  flex-direction: column;
+  padding-left: 40px;
+  position: relative;
+}
+
+/* Beautiful curved connecting lines (CSS Tree) */
+.mindmap-children-column > .mindmap-node-wrapper {
+  position: relative;
+}
+
+.mindmap-children-column > .mindmap-node-wrapper::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: -40px;
+  width: 40px;
+  border-top: 2px solid rgba(255, 255, 255, 0.15);
+}
+
+.mindmap-children-column > .mindmap-node-wrapper::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -40px;
+  border-left: 2px solid rgba(255, 255, 255, 0.15);
+}
+
+.mindmap-children-column > .mindmap-node-wrapper:first-child::after {
+  top: 50%;
+  border-top-left-radius: 12px;
+  border-top: 2px solid rgba(255, 255, 255, 0.15);
+}
+
+.mindmap-children-column > .mindmap-node-wrapper:first-child::before {
+  display: none;
+}
+
+.mindmap-children-column > .mindmap-node-wrapper:last-child::after {
+  bottom: 50%;
+  border-bottom-left-radius: 12px;
+  border-bottom: 2px solid rgba(255, 255, 255, 0.15);
+}
+
+.mindmap-children-column > .mindmap-node-wrapper:last-child::before {
+  display: none;
+}
+
+.mindmap-children-column > .mindmap-node-wrapper:first-child:last-child::after {
+  display: none;
+}
+
+.mindmap-children-column > .mindmap-node-wrapper:first-child:last-child::before {
+  display: block;
+}

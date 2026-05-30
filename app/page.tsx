@@ -3,9 +3,10 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { useSession, signOut } from "next-auth/react";
 import confetti from "canvas-confetti";
+import MindMapView from "./components/MindMapView";
 
 // ── Task interface ──────────────────────────────────────────────────────────
-interface Task {
+export interface Task {
   id: string;
   parentId?: string;
   text: string;
@@ -102,6 +103,7 @@ export default function Home() {
 
   // ── UI States ──
   const [expandedTaskId, setExpandedTaskId] = useState<string | null>(null);
+  const [mapRootTaskId, setMapRootTaskId] = useState<string | null>(null);
   const [collapsedTreeIds, setCollapsedTreeIds] = useState<Set<string>>(new Set());
 
   const toggleTreeCollapse = (taskId: string, e: React.MouseEvent) => {
@@ -1008,6 +1010,19 @@ export default function Home() {
                   {task.downgradeStatus === "loading" ? "⏳" : "😫"}
                 </button>
               )}
+                            {/* Map View button */}
+              <button
+                type="button"
+                className="edit-btn"
+                onClick={(e) => { e.stopPropagation(); setMapRootTaskId(task.id); }}
+                title="ツリーマップを表示"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="3" y="3" width="18" height="18" rx="2" />
+                  <path d="M9 3v18" />
+                  <path d="M9 12h12" />
+                </svg>
+              </button>
               {/* Edit button */}
               <button
                 type="button"
@@ -1630,6 +1645,39 @@ export default function Home() {
       <footer className="footer-note">
         <p>© 2026 FocusTodo. Securely Connected.</p>
       </footer>
+
+            {/* ── Mind Map View Overlay ── */}
+      {mapRootTaskId && (
+        <MindMapView
+          tasks={tasks}
+          rootTaskId={mapRootTaskId}
+          onClose={() => setMapRootTaskId(null)}
+          onToggleComplete={(id) => handleToggleComplete(id)}
+          onOpenEdit={(task) => handleOpenEdit(task, { stopPropagation: () => {} } as React.MouseEvent)}
+          onAddSubtask={(parentId) => {
+            const tempTask = {
+              id: Date.now().toString(),
+              text: "新しい子タスク",
+              completed: false,
+              category: tasks.find(t => t.id === parentId)?.category || categories[0],
+              priority: tasks.find(t => t.id === parentId)?.priority || "medium",
+              isRoutine: false,
+              parentId: parentId,
+              createdAt: Date.now()
+            };
+            setEditingTask(tempTask as Task);
+            setEditText(tempTask.text);
+            setEditDescription("");
+            setEditCategory(tempTask.category);
+            setEditPriority(tempTask.priority);
+            setEditParentId(tempTask.parentId || "");
+            setEditStartDate("");
+            setEditDueDate("");
+            setEditDueTime("");
+            setEditIsRoutine(false);
+          }}
+        />
+      )}
 
       {/* ── Task Edit Modal ── */}
       {editingTask && (
