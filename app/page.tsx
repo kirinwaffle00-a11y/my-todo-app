@@ -122,6 +122,8 @@ export default function Home() {
   // ── Form States ──
   const [inputText, setInputText] = useState("");
   const [newRoutineTitle, setNewRoutineTitle] = useState("");
+  const [editingRoutineId, setEditingRoutineId] = useState<string | null>(null);
+  const [editingRoutineTitle, setEditingRoutineTitle] = useState("");
   const [description, setDescription] = useState("");
   const [category, setCategory] = useState("勉強用");
   const [priority, setPriority] = useState<Task["priority"]>("medium");
@@ -729,6 +731,13 @@ export default function Home() {
     if (confirm("このルーティンを削除しますか？")) {
       updateRoutines(routines.filter(r => r.id !== routineId));
     }
+  };
+
+  const saveRoutineEdit = (routineId: string) => {
+    if (!editingRoutineTitle.trim()) return;
+    updateRoutines(routines.map(r => r.id === routineId ? { ...r, title: editingRoutineTitle.trim() } : r));
+    setEditingRoutineId(null);
+    setEditingRoutineTitle("");
   };
   const handleAddTask = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1942,16 +1951,36 @@ export default function Home() {
                     transition: "all 0.3s ease"
                   }}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                      <label style={{ display: "flex", alignItems: "center", gap: "12px", cursor: "pointer", flex: 1 }}>
-                        <input
-                          type="checkbox" checked={isCompletedToday} onChange={() => toggleRoutineCompleted(routine.id)}
-                          style={{ width: "24px", height: "24px", cursor: "pointer", accentColor: "var(--primary)" }}
-                        />
-                        <span style={{ fontSize: "1.1rem", fontWeight: 500, color: isCompletedToday ? "var(--text-muted)" : "var(--text)", textDecoration: isCompletedToday ? "line-through" : "none", transition: "all 0.3s" }}>
-                          {routine.title}
-                        </span>
-                      </label>
-                      <button onClick={() => deleteRoutine(routine.id)} style={{ background: "none", border: "none", color: "var(--danger)", cursor: "pointer", padding: "8px", opacity: 0.6 }}>🗑️</button>
+                      {editingRoutineId === routine.id ? (
+                        <div style={{ display: "flex", alignItems: "center", gap: "8px", flex: 1 }}>
+                          <input
+                            type="text"
+                            value={editingRoutineTitle}
+                            onChange={(e) => setEditingRoutineTitle(e.target.value)}
+                            onKeyDown={(e) => { if (e.key === "Enter") saveRoutineEdit(routine.id); else if (e.key === "Escape") setEditingRoutineId(null); }}
+                            autoFocus
+                            style={{ flex: 1, padding: "8px 12px", borderRadius: "8px", border: "1px solid rgba(255,255,255,0.2)", background: "rgba(0,0,0,0.2)", color: "var(--text)", outline: "none", fontSize: "1rem" }}
+                          />
+                          <button onClick={() => saveRoutineEdit(routine.id)} style={{ background: "var(--primary)", color: "#fff", border: "none", padding: "8px 16px", borderRadius: "8px", cursor: "pointer", fontWeight: "bold" }}>保存</button>
+                          <button onClick={() => setEditingRoutineId(null)} style={{ background: "rgba(255,255,255,0.1)", color: "var(--text)", border: "none", padding: "8px 16px", borderRadius: "8px", cursor: "pointer" }}>キャンセル</button>
+                        </div>
+                      ) : (
+                        <>
+                          <label style={{ display: "flex", alignItems: "center", gap: "12px", cursor: "pointer", flex: 1 }}>
+                            <input
+                              type="checkbox" checked={isCompletedToday} onChange={() => toggleRoutineCompleted(routine.id)}
+                              style={{ width: "24px", height: "24px", cursor: "pointer", accentColor: "var(--primary)" }}
+                            />
+                            <span style={{ fontSize: "1.1rem", fontWeight: 500, color: isCompletedToday ? "var(--text-muted)" : "var(--text)", textDecoration: isCompletedToday ? "line-through" : "none", transition: "all 0.3s" }}>
+                              {routine.title}
+                            </span>
+                          </label>
+                          <div style={{ display: "flex", gap: "4px" }}>
+                            <button onClick={() => { setEditingRoutineId(routine.id); setEditingRoutineTitle(routine.title); }} style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", padding: "8px", opacity: 0.6 }} title="編集">✏️</button>
+                            <button onClick={() => deleteRoutine(routine.id)} style={{ background: "none", border: "none", color: "var(--danger)", cursor: "pointer", padding: "8px", opacity: 0.6 }} title="削除">🗑️</button>
+                          </div>
+                        </>
+                      )}
                     </div>
                     
                     {/* Habit Tracker 7-day Dots */}
