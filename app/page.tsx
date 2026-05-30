@@ -365,6 +365,15 @@ export default function Home() {
         }
       }
 
+      // Sanitize orphaned tasks to fix any UI bugs with ghost tasks
+      let hasOrphans = true;
+      while (hasOrphans) {
+        const validTaskIds = new Set(finalTasks.map(t => t.id));
+        const initialCount = finalTasks.length;
+        finalTasks = finalTasks.filter(t => !t.parentId || validTaskIds.has(t.parentId));
+        hasOrphans = finalTasks.length < initialCount;
+      }
+
       setTasks(finalTasks);
       setRoutines(finalRoutines);
       setCategories(finalCats);
@@ -804,13 +813,20 @@ export default function Home() {
     const task = tasks.find((t) => t.id === id);
     const willComplete = task && !task.completed;
 
+    const getDescendants = (parentId: string): string[] => {
+      const children = tasks.filter(t => t.parentId === parentId).map(t => t.id);
+      return [...children, ...children.flatMap(getDescendants)];
+    };
+    const descendantIds = getDescendants(id);
+
     let updated = tasks.map((t) => {
-      if (t.id !== id) return t;
-      const newCompleted = !t.completed;
-      return {
-        ...t,
-        completed: newCompleted,
-      };
+      if (t.id === id) {
+        return { ...t, completed: !t.completed };
+      }
+      if (willComplete && descendantIds.includes(t.id)) {
+        return { ...t, completed: true };
+      }
+      return t;
     });
 
     if (willComplete && task?.parentId) {
