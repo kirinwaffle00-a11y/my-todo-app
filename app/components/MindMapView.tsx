@@ -106,9 +106,11 @@ export default function MindMapView({
 }: MindMapViewProps) {
   const [collapsedIds, setCollapsedIds] = useState<Set<string>>(new Set());
   const [canvasSize, setCanvasSize] = useState({ width: 2000, height: 1200 });
-  const [pan, setPan] = useState({ x: 60, y: 0 }); // initial pan offset
+  const [pan, setPan] = useState({ x: 60, y: 0 });
+  const [scale, setScale] = useState(1);
   const [isPanning, setIsPanning] = useState(false);
   const panStart = useRef({ mouseX: 0, mouseY: 0, panX: 0, panY: 0 });
+  const pinchStart = useRef({ dist: 0, scale: 1 });
   const containerRef = useRef<HTMLDivElement>(null);
 
   const toggleCollapse = (id: string) => {
@@ -164,21 +166,38 @@ export default function MindMapView({
 
   const onMouseUp = useCallback(() => setIsPanning(false), []);
 
-  // Touch pan handlers (mobile)
+  // Touch handlers (mobile) — 1 finger = pan, 2 fingers = pinch zoom
   const onTouchStart = useCallback((e: React.TouchEvent) => {
-    if ((e.target as HTMLElement).closest(".mm-node")) return;
-    const t = e.touches[0];
-    setIsPanning(true);
-    panStart.current = { mouseX: t.clientX, mouseY: t.clientY, panX: pan.x, panY: pan.y };
-  }, [pan]);
+    if (e.touches.length === 2) {
+      // Pinch start
+      const dx = e.touches[1].clientX - e.touches[0].clientX;
+      const dy = e.touches[1].clientY - e.touches[0].clientY;
+      pinchStart.current = { dist: Math.hypot(dx, dy), scale };
+      setIsPanning(false);
+    } else if (e.touches.length === 1) {
+      if ((e.target as HTMLElement).closest(".mm-node")) return;
+      const t = e.touches[0];
+      setIsPanning(true);
+      panStart.current = { mouseX: t.clientX, mouseY: t.clientY, panX: pan.x, panY: pan.y };
+    }
+  }, [pan, scale]);
 
   const onTouchMove = useCallback((e: React.TouchEvent) => {
-    if (!isPanning) return;
     e.preventDefault();
-    const t = e.touches[0];
-    const dx = t.clientX - panStart.current.mouseX;
-    const dy = t.clientY - panStart.current.mouseY;
-    setPan({ x: panStart.current.panX + dx, y: panStart.current.panY + dy });
+    if (e.touches.length === 2) {
+      // Pinch zoom
+      const dx = e.touches[1].clientX - e.touches[0].clientX;
+      const dy = e.touches[1].clientY - e.touches[0].clientY;
+      const newDist = Math.hypot(dx, dy);
+      const ratio = newDist / pinchStart.current.dist;
+      const newScale = Math.min(3, Math.max(0.3, pinchStart.current.scale * ratio));
+      setScale(newScale);
+    } else if (e.touches.length === 1 && isPanning) {
+      const t = e.touches[0];
+      const ddx = t.clientX - panStart.current.mouseX;
+      const ddy = t.clientY - panStart.current.mouseY;
+      setPan({ x: panStart.current.panX + ddx, y: panStart.current.panY + ddy });
+    }
   }, [isPanning]);
 
   const onTouchEnd = useCallback(() => setIsPanning(false), []);
@@ -193,52 +212,72 @@ export default function MindMapView({
         display: "flex",
         flexDirection: "column",
         fontFamily: "inherit",
+        paddingTop: "env(safe-area-inset-top, 0px)",
+        paddingBottom: "env(safe-area-inset-bottom, 0px)",
       }}
     >
       {/* Header */}
       <div
         style={{
-          height: 60,
+          minHeight: 56,
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
-          padding: "0 28px",
+          padding: "0 16px",
           borderBottom: "1px solid rgba(255,255,255,0.08)",
-          background: "rgba(255,255,255,0.03)",
+          background: "rgba(10,15,30,0.95)",
           flexShrink: 0,
-          backdropFilter: "blur(12px)",
+          gap: 8,
         }}
       >
-        <div style={{ display: "flex", alignItems: "center", gap: 10, color: "#7c8ff0", fontWeight: 700, fontSize: "1.05rem" }}>
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="12" cy="5" r="3" /><line x1="12" y1="8" x2="12" y2="12" />
-            <circle cx="5" cy="19" r="3" /><line x1="7.5" y1="17.5" x2="11" y2="13" />
-            <circle cx="19" cy="19" r="3" /><line x1="16.5" y1="17.5" x2="13" y2="13" />
-          </svg>
-          タスクツリービュー
+        {/* Back button — large tap target for mobile */}
+        <button
+          onClick={onClose}
+          style={{
+            background: "rgba(100,130,255,0.2)",
+            border: "1px solid rgba(100,130,255,0.4)",
+            color: "#c7d2fe",
+            padding: "10px 16px",
+            borderRadius: 12,
+            fontSize: "0.95rem",
+            fontWeight: 600,
+            cursor: "pointer",
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            flexShrink: 0,
+            minHeight: 44,
+            minWidth: 44,
+          }}
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polyline points="15 18 9 12 15 6"/></svg>
+          <span style={{ display: "none", fontSize: "0.85rem" }}>戻る</span>
+          戻る
+        </button>
+
+        <div style={{ color: "#7c8ff0", fontWeight: 700, fontSize: "0.95rem", flex: 1, textAlign: "center" }}>
+          🌳 ツリービュー
         </div>
-        <div style={{ display: "flex", gap: 10 }}>
-          <span style={{ fontSize: "0.8rem", color: "rgba(255,255,255,0.3)", alignSelf: "center" }}>
-            ドラッグでパン ・ ノードをクリックして編集
-          </span>
-          <button
-            onClick={onClose}
-            style={{
-              background: "rgba(255,255,255,0.1)",
-              border: "1px solid rgba(255,255,255,0.18)",
-              color: "#e2e8f0",
-              padding: "8px 18px",
-              borderRadius: 20,
-              fontSize: "0.875rem",
-              cursor: "pointer",
-              transition: "all 0.2s",
-            }}
-            onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(255,255,255,0.18)"; }}
-            onMouseLeave={(e) => { e.currentTarget.style.background = "rgba(255,255,255,0.1)"; }}
-          >
-            ← リストに戻る
-          </button>
-        </div>
+
+        {/* Zoom reset */}
+        <button
+          onClick={() => setScale(1)}
+          style={{
+            background: Math.abs(scale - 1) > 0.05 ? "rgba(100,130,255,0.25)" : "rgba(255,255,255,0.07)",
+            border: "1px solid rgba(255,255,255,0.15)",
+            color: "rgba(255,255,255,0.7)",
+            padding: "8px 12px",
+            borderRadius: 10,
+            fontSize: "0.78rem",
+            cursor: "pointer",
+            flexShrink: 0,
+            minHeight: 44,
+            fontVariantNumeric: "tabular-nums",
+          }}
+          title="ズームリセット"
+        >
+          {Math.round(scale * 100)}%
+        </button>
       </div>
 
       {/* Canvas */}
@@ -280,6 +319,8 @@ export default function MindMapView({
             left: pan.x,
             width: canvasSize.width,
             height: canvasSize.height,
+            transform: `scale(${scale})`,
+            transformOrigin: "0 0",
           }}
         >
           {/* SVG Edges */}

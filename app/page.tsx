@@ -316,6 +316,10 @@ export default function Home() {
       }
     } catch { /* ignore */ }
 
+    // Force immediate server fetch on load by resetting the debounce timestamp.
+    // This ensures the server (source of truth) always overrides stale localStorage
+    // even when the user switches devices.
+    lastLocalWrite.current = 0;
     fetchState();
     const syncInterval = setInterval(fetchState, 5000);
     return () => clearInterval(syncInterval);
@@ -1218,6 +1222,7 @@ export default function Home() {
     : [];
 
   return (
+    <>
     <div className="app-container">
       
       {/* Toast Notification */}
@@ -1652,39 +1657,6 @@ export default function Home() {
         <p>© 2026 FocusTodo. Securely Connected.</p>
       </footer>
 
-            {/* ── Mind Map View Overlay ── */}
-      {mapRootTaskId && (
-        <MindMapView
-          tasks={tasks}
-          rootTaskId={mapRootTaskId}
-          onClose={() => setMapRootTaskId(null)}
-          onToggleComplete={(id) => handleToggleComplete(id)}
-          onOpenEdit={(task) => handleOpenEdit(task, { stopPropagation: () => {} } as React.MouseEvent)}
-          onAddSubtask={(parentId) => {
-            const tempTask = {
-              id: Date.now().toString(),
-              text: "新しい子タスク",
-              completed: false,
-              category: tasks.find(t => t.id === parentId)?.category || categories[0],
-              priority: tasks.find(t => t.id === parentId)?.priority || "medium",
-              isRoutine: false,
-              parentId: parentId,
-              createdAt: Date.now()
-            };
-            setEditingTask(tempTask as Task);
-            setEditText(tempTask.text);
-            setEditDescription("");
-            setEditCategory(tempTask.category);
-            setEditPriority(tempTask.priority);
-            setEditParentId(tempTask.parentId || "");
-            setEditStartDate("");
-            setEditDueDate("");
-            setEditDueTime("");
-            setEditIsRoutine(false);
-          }}
-        />
-      )}
-
       {/* ── Task Edit Modal ── */}
       {editingTask && (
         <div className="modal-overlay" onClick={() => setEditingTask(null)}>
@@ -2038,5 +2010,39 @@ export default function Home() {
         </div>
       )}
     </div>
+
+      {/* ── Mind Map View Overlay — rendered OUTSIDE app-container so position:fixed z-index works ── */}
+      {mapRootTaskId && (
+        <MindMapView
+          tasks={tasks}
+          rootTaskId={mapRootTaskId}
+          onClose={() => setMapRootTaskId(null)}
+          onToggleComplete={(id) => handleToggleComplete(id)}
+          onOpenEdit={(task) => handleOpenEdit(task, { stopPropagation: () => {} } as React.MouseEvent)}
+          onAddSubtask={(parentId) => {
+            const tempTask = {
+              id: Date.now().toString(),
+              text: "新しい子タスク",
+              completed: false,
+              category: tasks.find(t => t.id === parentId)?.category || categories[0],
+              priority: tasks.find(t => t.id === parentId)?.priority || "medium",
+              isRoutine: false,
+              parentId: parentId,
+              createdAt: Date.now()
+            };
+            setEditingTask(tempTask as Task);
+            setEditText(tempTask.text);
+            setEditDescription("");
+            setEditCategory(tempTask.category);
+            setEditPriority(tempTask.priority);
+            setEditParentId(tempTask.parentId || "");
+            setEditStartDate("");
+            setEditDueDate("");
+            setEditDueTime("");
+            setEditIsRoutine(false);
+          }}
+        />
+      )}
+    </>
   );
 }
