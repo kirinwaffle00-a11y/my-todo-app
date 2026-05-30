@@ -53,6 +53,7 @@ export interface UserState {
   averageBedtime: string;
   taskVelocityPerHour: number;
   lastDiscordDailySentDate?: string;
+  updatedAt?: number;
 }
 
 const DEFAULT_STATE: UserState = {
@@ -135,10 +136,13 @@ async function fsSet(userId: string, state: UserState): Promise<void> {
 }
 
 // ── Public API ───────────────────────────────────────────────────────────────
-export async function getUserState(userId: string): Promise<UserState> {
+export async function getUserState(userId: string): Promise<UserState & { initialized: boolean }> {
   try {
     const raw = KV_AVAILABLE ? await kvGet(userId) : await fsGet(userId);
-    if (!raw) return { ...DEFAULT_STATE };
+    if (!raw) {
+      // Key does not exist — new user or never saved from this account
+      return { ...DEFAULT_STATE, initialized: false };
+    }
     return {
       tasks: Array.isArray(raw.tasks) ? raw.tasks : [],
       categories: Array.isArray(raw.categories) ? raw.categories : DEFAULT_STATE.categories,
@@ -147,10 +151,12 @@ export async function getUserState(userId: string): Promise<UserState> {
       disciplineScore: raw.disciplineScore ?? 0,
       averageBedtime: raw.averageBedtime ?? "23:30",
       taskVelocityPerHour: raw.taskVelocityPerHour ?? 60,
+      updatedAt: raw.updatedAt,
+      initialized: true, // Key exists — trust this data (even if tasks is empty)
     };
   } catch (e) {
     console.error("[kv] getUserState error:", e);
-    return { ...DEFAULT_STATE };
+    return { ...DEFAULT_STATE, initialized: false };
   }
 }
 

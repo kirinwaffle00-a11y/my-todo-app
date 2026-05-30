@@ -66,12 +66,13 @@ export async function GET() {
   const session = await getServerSession(authOptions);
   const userId = (session as { userId?: string; accessToken?: string })?.userId as string | undefined;
 
-  let state: UserState;
+  let state: UserState & { initialized?: boolean };
   if (userId) {
     state = await getUserState(userId);
   } else {
     // [H-2] ゲスト状態の読み込みは許可（書き込みは認証必須）
-    state = await loadGuestState();
+    // Guest users always get initialized=false so client uses localStorage
+    state = { ...(await loadGuestState()), initialized: false };
   }
 
   logger.info({ action: "tasks/GET", status: "success", userId: userId ?? "guest" });
@@ -126,6 +127,7 @@ export async function POST(request: Request) {
       taskVelocityPerHour: typeof body.taskVelocityPerHour === "number"
         ? Math.max(0, Math.min(1000, body.taskVelocityPerHour)) // 0-1000 の範囲に制限
         : 60,
+      updatedAt: typeof body.updatedAt === "number" ? body.updatedAt : Date.now(),
     };
 
     await setUserState(userId, state);

@@ -46,7 +46,7 @@ const PRIORITY_LABEL: Record<Task["priority"], string> = {
 // ── Component ────────────────────────────────────────────────────────────────
 export default function Home() {
   // ── Google OAuth session ──
-  const { data: session } = useSession();
+  const { data: session, status } = useSession();
   const gcalEnabled = !!(session as { accessToken?: string })?.accessToken;
   // ── Sync States ──
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -136,6 +136,9 @@ export default function Home() {
   const categoryRef = useRef(category);
   useEffect(() => { categoryRef.current = category; }, [category]);
 
+  const [isFetched, setIsFetched] = useState(false);
+  const isFetchedRef = useRef(false);
+
   // ── localStorage ──────────────────────────────────────────────────────────
   const LS_TASKS = "focustodo_tasks";
   const LS_CATS  = "focustodo_categories";
@@ -150,6 +153,7 @@ export default function Home() {
     tasks: Task[]; categories: string[]; lastWrite: number; 
     discordWebhookUrl: string; discordNotifyTime: string;
     disciplineScore: number; averageBedtime: string; taskVelocityPerHour: number;
+    updatedAt: number;
   } => {
     try {
       const t = localStorage.getItem(LS_TASKS);
@@ -160,6 +164,8 @@ export default function Home() {
       const disc = localStorage.getItem(LS_DISCIPLINE);
       const bed = localStorage.getItem(LS_BEDTIME);
       const vel = localStorage.getItem(LS_VELOCITY);
+      
+      const u = localStorage.getItem("focustodo_updated_at");
       
       const rawTasks: Task[] = t ? JSON.parse(t) : [];
       const migratedTasks = rawTasks.map((task: Partial<Task>) => ({
@@ -176,19 +182,22 @@ export default function Home() {
         disciplineScore: disc ? Number(disc) : 0,
         averageBedtime: bed || "23:30",
         taskVelocityPerHour: vel ? Number(vel) : 60,
+        updatedAt: u ? Number(u) : 0,
       };
     } catch {
       return { 
         tasks: [], categories: ["勉強用", "その他"], lastWrite: 0, 
         discordWebhookUrl: "", discordNotifyTime: "08:00",
-        disciplineScore: 0, averageBedtime: "23:30", taskVelocityPerHour: 60 
+        disciplineScore: 0, averageBedtime: "23:30", taskVelocityPerHour: 60,
+        updatedAt: 0
       };
     }
   };
 
   const saveToLocalStorage = (
     t: Task[], c: string[], dw?: string, dt?: string, 
-    disciplineScore?: number, averageBedtime?: string, taskVelocityPerHour?: number
+    disciplineScore?: number, averageBedtime?: string, taskVelocityPerHour?: number,
+    updatedAt?: number
   ) => {
     try {
       const now = Date.now();
@@ -200,6 +209,7 @@ export default function Home() {
       if (disciplineScore !== undefined) localStorage.setItem(LS_DISCIPLINE, String(disciplineScore));
       if (averageBedtime !== undefined) localStorage.setItem(LS_BEDTIME, averageBedtime);
       if (taskVelocityPerHour !== undefined) localStorage.setItem(LS_VELOCITY, String(taskVelocityPerHour));
+      if (updatedAt !== undefined) localStorage.setItem("focustodo_updated_at", String(updatedAt));
     } catch { /* localStorage unavailable */ }
   };
 
@@ -242,19 +252,56 @@ export default function Home() {
       const serverDiscipline = data.disciplineScore || 0;
       const serverBedtime = data.averageBedtime || "23:30";
       const serverVelocity = data.taskVelocityPerHour || 60;
+      const serverUpdatedAt = data.updatedAt || 0;
 
       const local = loadFromLocalStorage();
-      // ── Source-of-truth: server always wins when authenticated ──
-      // Old length-comparison caused mobile to show stale data after deleting on PC.
-      // The server holds the canonical state for logged-in users.
-      const serverHasData = serverTasks.length > 0 || data.tasks !== undefined;
-      const finalTasks = applyRoutineRestore(serverHasData ? serverTasks : local.tasks);
-      const finalCats = serverHasData ? serverCats : local.categories;
-      const finalWebhook = serverHasData ? serverWebhook : local.discordWebhookUrl;
-      const finalTime = serverHasData ? serverTime : local.discordNotifyTime;
-      const finalDiscipline = serverHasData ? serverDiscipline : local.disciplineScore;
-      const finalBedtime = serverHasData ? serverBedtime : local.averageBedtime;
-      const finalVelocity = serverHasData ? serverVelocity : local.taskVelocityPerHour;
+      const localUpdatedAt = local.updatedAt || 0;
+      
+      const serverHasData = data.initialized === true;
+      
+      let finalTasks: Task[];
+      let finalCats: string[];
+      let finalWebhook: string;
+      let finalTime: string;
+      let finalDiscipline: number;
+      let finalBedtime: string;
+      let finalVelocity: number;
+      let finalUpdatedAt: number;
+
+      if (!serverHasData) {
+        // Server has no data (new user) => Use local
+        finalTasks = applyRoutineRestore(local.tasks);
+        finalCats = local.categories;
+        finalWebhook = local.discordWebhookUrl;
+        finalTime = local.discordNotifyTime;
+        finalDiscipline = local.disciplineScore;
+        finalBedtime = local.averageBedtime;
+        finalVelocity = local.taskVelocityPerHour;
+        finalUpdatedAt = localUpdatedAt || Date.now();
+      } else {
+        // Server is initialized, use timestamp-based resolution
+        if (localUpdatedAt > serverUpdatedAt) {
+          // Local is newer (e.g. offline edits) => Use local
+          finalTasks = applyRoutineRestore(local.tasks);
+          finalCats = local.categories;
+          finalWebhook = local.discordWebhookUrl;
+          finalTime = local.discordNotifyTime;
+          finalDiscipline = local.disciplineScore;
+          finalBedtime = local.averageBedtime;
+          finalVelocity = local.taskVelocityPerHour;
+          finalUpdatedAt = localUpdatedAt;
+        } else {
+          // Server is newer or equal => Use server
+          finalTasks = applyRoutineRestore(serverTasks);
+          finalCats = serverCats;
+          finalWebhook = serverWebhook;
+          finalTime = serverTime;
+          finalDiscipline = serverDiscipline;
+          finalBedtime = serverBedtime;
+          finalVelocity = serverVelocity;
+          finalUpdatedAt = serverUpdatedAt;
+        }
+      }
 
       setTasks(finalTasks);
       setCategories(finalCats);
@@ -263,67 +310,110 @@ export default function Home() {
       setDisciplineScore(finalDiscipline);
       setAverageBedtime(finalBedtime);
       setTaskVelocityPerHour(finalVelocity);
-      saveToLocalStorage(finalTasks, finalCats, finalWebhook, finalTime, finalDiscipline, finalBedtime, finalVelocity);
+      saveToLocalStorage(finalTasks, finalCats, finalWebhook, finalTime, finalDiscipline, finalBedtime, finalVelocity, finalUpdatedAt);
       lastLocalWrite.current = Date.now();
       if (!finalCats.includes(categoryRef.current) && finalCats.length > 0) {
         setCategory(finalCats[0]);
       }
+      
+      // Upload to server if local was newer or server was uninitialized
+      if (!serverHasData || localUpdatedAt > serverUpdatedAt) {
+         fetch("/api/tasks", {
+           method: "POST",
+           headers: { "Content-Type": "application/json" },
+           body: JSON.stringify({
+             tasks: finalTasks,
+             categories: finalCats,
+             discordWebhookUrl: finalWebhook,
+             discordNotifyTime: finalTime,
+             disciplineScore: finalDiscipline,
+             averageBedtime: finalBedtime,
+             taskVelocityPerHour: finalVelocity,
+             updatedAt: finalUpdatedAt
+           }),
+         }).catch(() => {});
+      }
     } catch {
       serverAvailable.current = false;
+      if (!isFetchedRef.current) {
+         const local = loadFromLocalStorage();
+         setTasks(applyRoutineRestore(local.tasks));
+         setCategories(local.categories);
+         setDiscordWebhookUrl(local.discordWebhookUrl);
+         setDiscordNotifyTime(local.discordNotifyTime);
+         setDisciplineScore(local.disciplineScore);
+         setAverageBedtime(local.averageBedtime);
+         setTaskVelocityPerHour(local.taskVelocityPerHour);
+      }
     } finally {
+      if (!isFetchedRef.current) {
+        isFetchedRef.current = true;
+        setIsFetched(true);
+      }
       isLoaded.current = true;
     }
   }, []);
 
   // ── Initial Load ──────────────────────────────────────────────────────────
   useEffect(() => {
-    isLoaded.current = true;
+    if (status === "loading") return;
 
-    const local = loadFromLocalStorage();
-    const restored = applyRoutineRestore(local.tasks);
-    if (restored.length > 0 || local.categories.length > 0) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setTasks(restored);
-      setCategories(local.categories);
-    }
-    setDiscordWebhookUrl(local.discordWebhookUrl);
-    setDiscordNotifyTime(local.discordNotifyTime);
-    
-    // Load custom work / break durations
-    const savedWork = localStorage.getItem("focustodo_work_dur");
-    const savedBreak = localStorage.getItem("focustodo_break_dur");
-    let initialWorkMins = 25;
-    if (savedWork) {
-      const w = parseInt(savedWork, 10);
-      if (!isNaN(w) && w > 0) {
-        setWorkDuration(w);
-        initialWorkMins = w;
+    if (status === "unauthenticated") {
+      if (!isFetchedRef.current) {
+        const local = loadFromLocalStorage();
+        setTasks(applyRoutineRestore(local.tasks));
+        setCategories(local.categories);
+        setDiscordWebhookUrl(local.discordWebhookUrl);
+        setDiscordNotifyTime(local.discordNotifyTime);
+        setDisciplineScore(local.disciplineScore);
+        setAverageBedtime(local.averageBedtime);
+        setTaskVelocityPerHour(local.taskVelocityPerHour);
+        
+        const savedWork = localStorage.getItem("focustodo_work_dur");
+        const savedBreak = localStorage.getItem("focustodo_break_dur");
+        if (savedWork) setWorkDuration(parseInt(savedWork, 10));
+        if (savedBreak) setBreakDuration(parseInt(savedBreak, 10));
+        setTimerSeconds((savedWork ? parseInt(savedWork, 10) : 25) * 60);
+
+        isFetchedRef.current = true;
+        setIsFetched(true);
+        isLoaded.current = true;
       }
+      return;
     }
-    if (savedBreak) {
-      const b = parseInt(savedBreak, 10);
-      if (!isNaN(b) && b > 0) {
-        setBreakDuration(b);
+
+    if (!isFetchedRef.current) {
+      const savedWork = localStorage.getItem("focustodo_work_dur");
+      const savedBreak = localStorage.getItem("focustodo_break_dur");
+      let initialWorkMins = 25;
+      if (savedWork) {
+        const w = parseInt(savedWork, 10);
+        if (!isNaN(w) && w > 0) {
+          setWorkDuration(w);
+          initialWorkMins = w;
+        }
       }
+      if (savedBreak) {
+        const b = parseInt(savedBreak, 10);
+        if (!isNaN(b) && b > 0) {
+          setBreakDuration(b);
+        }
+      }
+      setTimerSeconds(initialWorkMins * 60);
+
+      try {
+        if (typeof window !== "undefined" && "Notification" in window) {
+          setNotifPermission(Notification.permission);
+        }
+      } catch { /* ignore */ }
+
+      lastLocalWrite.current = 0;
+      fetchState();
     }
-    setTimerSeconds(initialWorkMins * 60);
 
-    if (local.lastWrite > 0) lastLocalWrite.current = local.lastWrite;
-
-    try {
-      if (typeof window !== "undefined" && "Notification" in window) {
-        setNotifPermission(Notification.permission);
-      }
-    } catch { /* ignore */ }
-
-    // Force immediate server fetch on load by resetting the debounce timestamp.
-    // This ensures the server (source of truth) always overrides stale localStorage
-    // even when the user switches devices.
-    lastLocalWrite.current = 0;
-    fetchState();
     const syncInterval = setInterval(fetchState, 5000);
     return () => clearInterval(syncInterval);
-  }, [fetchState]);
+  }, [status, fetchState]);
 
   // ── Pomodoro Timer Logic ──────────────────────────────────────────────────
   const updateWorkDuration = (mins: number) => {
@@ -410,6 +500,7 @@ export default function Home() {
   // ── Reminder Notifications ────────────────────────────────────────────────
   useEffect(() => {
     const checkReminders = () => {
+      if (!isFetchedRef.current) return;
       if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
       const now = new Date();
       const safeTasks = Array.isArray(tasks) ? tasks : [];
@@ -435,7 +526,7 @@ export default function Home() {
 
   // ── Frustration Prediction Alert ──────────────────────────────────────────
   useEffect(() => {
-    if (!isLoaded.current || tasks.length === 0) return;
+    if (!isFetched || tasks.length === 0) return;
     
     // Check risk on client side only once per session
     if (typeof window !== "undefined" && !sessionStorage.getItem("frustration_alert_shown")) {
@@ -470,14 +561,22 @@ export default function Home() {
     updatedTasks: Task[], updatedCategories: string[], 
     dw?: string, dt?: string, disc?: number, bed?: string, vel?: number
   ) {
+    if (!isFetchedRef.current) {
+      console.warn("[sync] saveStateToServer blocked: isFetched=false (initial load not complete)");
+      return;
+    }
     lastLocalWrite.current = Date.now();
     const webhook = dw !== undefined ? dw : discordWebhookUrl;
     const notifyTime = dt !== undefined ? dt : discordNotifyTime;
     const finalDisc = disc !== undefined ? disc : disciplineScore;
     const finalBed = bed !== undefined ? bed : averageBedtime;
     const finalVel = vel !== undefined ? vel : taskVelocityPerHour;
+    const currentUpdatedAt = Date.now();
     
-    saveToLocalStorage(updatedTasks, updatedCategories, webhook, notifyTime, finalDisc, finalBed, finalVel);
+    saveToLocalStorage(updatedTasks, updatedCategories, webhook, notifyTime, finalDisc, finalBed, finalVel, currentUpdatedAt);
+    
+    if (status === "unauthenticated") return; // Guest mode does not save to server
+
     try {
       await fetch("/api/tasks", {
         method: "POST",
@@ -489,7 +588,8 @@ export default function Home() {
           discordNotifyTime: notifyTime,
           disciplineScore: finalDisc,
           averageBedtime: finalBed,
-          taskVelocityPerHour: finalVel
+          taskVelocityPerHour: finalVel,
+          updatedAt: currentUpdatedAt
         }),
       });
     } catch { /* localStorage already saved */ }
@@ -1220,6 +1320,25 @@ export default function Home() {
   const activeNotToDos = timerRunning && timerMode === "work"
     ? tasks.filter(t => !t.completed && t.notToDos?.length).flatMap(t => t.notToDos!)
     : [];
+
+  // ── Loading Screen ────────────────────────────────────────────────────────
+  if (!isFetched || status === "loading") {
+    return (
+      <div className="app-container" style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: "60vh", gap: 24 }}>
+        <div style={{
+          width: 48, height: 48,
+          border: "3px solid rgba(129,140,248,0.2)",
+          borderTop: "3px solid #818cf8",
+          borderRadius: "50%",
+          animation: "spin 0.9s linear infinite",
+        }} />
+        <p style={{ color: "var(--text-muted)", fontSize: "0.95rem", margin: 0 }}>
+          データを読み込んでいます...
+        </p>
+        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+      </div>
+    );
+  }
 
   return (
     <>
