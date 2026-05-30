@@ -859,12 +859,35 @@ export default function Home() {
 
   const handleDeleteTask = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    updateState(tasks.filter((t) => t.id !== id), categories);
-    if (expandedTaskId === id) setExpandedTaskId(null);
+    
+    const getDescendants = (parentId: string): string[] => {
+      const children = tasks.filter(t => t.parentId === parentId).map(t => t.id);
+      return [...children, ...children.flatMap(getDescendants)];
+    };
+    
+    const idsToDelete = new Set([id, ...getDescendants(id)]);
+    updateState(tasks.filter((t) => !idsToDelete.has(t.id)), categories);
+    
+    if (expandedTaskId && idsToDelete.has(expandedTaskId)) {
+      setExpandedTaskId(null);
+    }
   };
 
   const handleClearCompleted = () => {
-    updateState(tasks.filter((t) => !t.completed), categories);
+    const completedIds = tasks.filter(t => t.completed).map(t => t.id);
+    
+    const getDescendants = (parentId: string): string[] => {
+      const children = tasks.filter(t => t.parentId === parentId).map(t => t.id);
+      return [...children, ...children.flatMap(getDescendants)];
+    };
+    
+    const idsToDelete = new Set<string>();
+    for (const id of completedIds) {
+      idsToDelete.add(id);
+      getDescendants(id).forEach(dId => idsToDelete.add(dId));
+    }
+    
+    updateState(tasks.filter((t) => !idsToDelete.has(t.id)), categories);
     setExpandedTaskId(null);
   };
 
