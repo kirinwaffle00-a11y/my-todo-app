@@ -244,19 +244,17 @@ export default function Home() {
       const serverVelocity = data.taskVelocityPerHour || 60;
 
       const local = loadFromLocalStorage();
-      if (serverTasks.length === 0 && local.tasks.length > 0) {
-        serverAvailable.current = false;
-        return;
-      }
-
-      const useServer = serverTasks.length >= local.tasks.length;
-      const finalTasks = applyRoutineRestore(useServer ? serverTasks : local.tasks);
-      const finalCats = useServer ? serverCats : local.categories;
-      const finalWebhook = useServer ? serverWebhook : local.discordWebhookUrl;
-      const finalTime = useServer ? serverTime : local.discordNotifyTime;
-      const finalDiscipline = useServer ? serverDiscipline : local.disciplineScore;
-      const finalBedtime = useServer ? serverBedtime : local.averageBedtime;
-      const finalVelocity = useServer ? serverVelocity : local.taskVelocityPerHour;
+      // ── Source-of-truth: server always wins when authenticated ──
+      // Old length-comparison caused mobile to show stale data after deleting on PC.
+      // The server holds the canonical state for logged-in users.
+      const serverHasData = serverTasks.length > 0 || data.tasks !== undefined;
+      const finalTasks = applyRoutineRestore(serverHasData ? serverTasks : local.tasks);
+      const finalCats = serverHasData ? serverCats : local.categories;
+      const finalWebhook = serverHasData ? serverWebhook : local.discordWebhookUrl;
+      const finalTime = serverHasData ? serverTime : local.discordNotifyTime;
+      const finalDiscipline = serverHasData ? serverDiscipline : local.disciplineScore;
+      const finalBedtime = serverHasData ? serverBedtime : local.averageBedtime;
+      const finalVelocity = serverHasData ? serverVelocity : local.taskVelocityPerHour;
 
       setTasks(finalTasks);
       setCategories(finalCats);
@@ -561,6 +559,10 @@ export default function Home() {
     setPriority("medium");
     setIsRoutine(false);
     setShowOptions(false);
+    // iOS: blur any focused input to dismiss keyboard and reset zoom
+    if (document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur();
+    }
   };
 
   const handleToggleComplete = async (id: string) => {
@@ -722,6 +724,10 @@ export default function Home() {
     }
     updateState(updated, categories);
     setEditingTask(null);
+    // iOS: reset zoom after closing modal
+    if (document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur();
+    }
   };
 
   // ── Downgrade Features (AI) ───────────────────────────────────────

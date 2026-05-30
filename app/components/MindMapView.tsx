@@ -148,9 +148,8 @@ export default function MindMapView({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [collapsedIds, tasks, rootTaskId]);
 
-  // Pan handlers
+  // Mouse pan handlers
   const onMouseDown = useCallback((e: React.MouseEvent) => {
-    // Only pan on the background (not on nodes)
     if ((e.target as HTMLElement).closest(".mm-node")) return;
     setIsPanning(true);
     panStart.current = { mouseX: e.clientX, mouseY: e.clientY, panX: pan.x, panY: pan.y };
@@ -164,6 +163,25 @@ export default function MindMapView({
   }, [isPanning]);
 
   const onMouseUp = useCallback(() => setIsPanning(false), []);
+
+  // Touch pan handlers (mobile)
+  const onTouchStart = useCallback((e: React.TouchEvent) => {
+    if ((e.target as HTMLElement).closest(".mm-node")) return;
+    const t = e.touches[0];
+    setIsPanning(true);
+    panStart.current = { mouseX: t.clientX, mouseY: t.clientY, panX: pan.x, panY: pan.y };
+  }, [pan]);
+
+  const onTouchMove = useCallback((e: React.TouchEvent) => {
+    if (!isPanning) return;
+    e.preventDefault();
+    const t = e.touches[0];
+    const dx = t.clientX - panStart.current.mouseX;
+    const dy = t.clientY - panStart.current.mouseY;
+    setPan({ x: panStart.current.panX + dx, y: panStart.current.panY + dy });
+  }, [isPanning]);
+
+  const onTouchEnd = useCallback(() => setIsPanning(false), []);
 
   return (
     <div
@@ -231,11 +249,15 @@ export default function MindMapView({
           overflow: "hidden",
           cursor: isPanning ? "grabbing" : "grab",
           position: "relative",
+          touchAction: "none", // Prevent browser scroll hijacking on mobile
         }}
         onMouseDown={onMouseDown}
         onMouseMove={onMouseMove}
         onMouseUp={onMouseUp}
         onMouseLeave={onMouseUp}
+        onTouchStart={onTouchStart}
+        onTouchMove={onTouchMove}
+        onTouchEnd={onTouchEnd}
       >
         {/* Subtle grid background */}
         <div
