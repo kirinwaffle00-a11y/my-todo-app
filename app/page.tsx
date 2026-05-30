@@ -1656,8 +1656,9 @@ export default function Home() {
       <footer className="footer-note">
         <p>© 2026 FocusTodo. Securely Connected.</p>
       </footer>
+    </div>  {/* end app-container */}
 
-      {/* ── Task Edit Modal ── */}
+      {/* ── Task Edit Modal ── portal outside app-container */}
       {editingTask && (
         <div className="modal-overlay" onClick={() => setEditingTask(null)}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
@@ -2009,7 +2010,6 @@ export default function Home() {
           </div>
         </div>
       )}
-    </div>
 
       {/* ── Mind Map View Overlay — rendered OUTSIDE app-container so position:fixed z-index works ── */}
       {mapRootTaskId && (

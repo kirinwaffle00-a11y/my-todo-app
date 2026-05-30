@@ -207,8 +207,8 @@ export default function MindMapView({
       style={{
         position: "fixed",
         inset: 0,
-        zIndex: 9999,
-        background: "rgba(7, 11, 22, 0.97)",
+        zIndex: 9000,  /* modals are at 10000, so they appear on top */
+        background: "rgb(7, 11, 22)",  /* fully opaque — no transparency */
         display: "flex",
         flexDirection: "column",
         fontFamily: "inherit",
