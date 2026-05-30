@@ -90,8 +90,21 @@ async function kvGet(userId: string): Promise<UserState | null> {
   const json = await res.json();
   if (!json || json.result === null) return null;
 
-  // Upstash REST API returns string values that need JSON.parse
-  const value = typeof json.result === "string" ? JSON.parse(json.result) : json.result;
+  // Upstash REST API might return a string or an object depending on how it was saved.
+  let value: UserState;
+  if (typeof json.result === "string") {
+    try {
+      value = JSON.parse(json.result);
+      // If it was double-stringified in the past, parse it again
+      if (typeof value === "string") {
+        value = JSON.parse(value);
+      }
+    } catch {
+      return null;
+    }
+  } else {
+    value = json.result;
+  }
   return value as UserState;
 }
 
@@ -106,7 +119,9 @@ async function kvSet(userId: string, state: UserState): Promise<void> {
       Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify(JSON.stringify(state)), // Upstash stores as string
+    // Upstash /set/key endpoint takes the value as the request body.
+    // Send a single JSON string.
+    body: JSON.stringify(state), 
   });
   if (!res.ok) {
     throw new Error(`KV set failed: ${res.status}`);
