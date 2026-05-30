@@ -820,17 +820,14 @@ export default function Home() {
     const descendantIds = getDescendants(id);
 
     let updated = tasks.map((t) => {
-      if (t.id === id) {
-        return { ...t, completed: !t.completed };
-      }
-      if (willComplete && descendantIds.includes(t.id)) {
-        return { ...t, completed: true };
+      if (t.id === id || descendantIds.includes(t.id)) {
+        return { ...t, completed: Boolean(willComplete) };
       }
       return t;
     });
 
     if (willComplete && task?.parentId) {
-      // Cascade completion to parents if all their children are completed
+      // Cascade TRUE to parents if all their children are completed
       let currentParentId: string | undefined = task.parentId;
       while (currentParentId) {
         const pId: string = currentParentId;
@@ -846,6 +843,19 @@ export default function Home() {
         } else {
           break;
         }
+      }
+    } else if (!willComplete && task?.parentId) {
+      // Cascade FALSE to all ancestors
+      let currentParentId: string | undefined = task.parentId;
+      while (currentParentId) {
+        const pId: string = currentParentId;
+        const parent = updated.find(t => t.id === pId);
+        if (!parent) break;
+
+        if (parent.completed) {
+          updated = updated.map(t => t.id === pId ? { ...t, completed: false } : t);
+        }
+        currentParentId = parent.parentId;
       }
     }
     updateState(updated, categories);
