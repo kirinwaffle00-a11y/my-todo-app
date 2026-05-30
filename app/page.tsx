@@ -155,6 +155,9 @@ export default function Home() {
   const [showOptions, setShowOptions] = useState(false);
   const [statusFilter, setStatusFilter] = useState<"all" | "active" | "completed">("all");
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
+  const [newRoutineCategory, setNewRoutineCategory] = useState<string>("その他");
+  const [editingRoutineCategory, setEditingRoutineCategory] = useState<string>("その他");
+  const [routineCategoryFilter, setRoutineCategoryFilter] = useState<string>("all");
   const [notifPermission, setNotifPermission] = useState<NotificationPermission>("default");
 
   // ── Pomodoro Timer ──
@@ -703,16 +706,19 @@ export default function Home() {
   // ── Handlers ──────────────────────────────────────────────────────────────
   const handleAddRoutine = (e: React.FormEvent) => {
     e.preventDefault();
-    const trimmed = newRoutineTitle.trim();
-    if (!trimmed) return;
+    const trimmedTitle = newRoutineTitle.trim().slice(0, 50);
+    const trimmedDesc = newRoutineDescription.trim().slice(0, 200);
+    if (!trimmedTitle) return;
     const newRoutine: Routine = {
       id: Date.now().toString(),
-      title: trimmed,
-      category: "その他",
+      title: trimmedTitle,
+      description: trimmedDesc || undefined,
+      category: newRoutineCategory || "その他",
       completedDates: [],
     };
     updateRoutines([...routines, newRoutine]);
     setNewRoutineTitle("");
+    setNewRoutineDescription("");
   };
 
   const toggleRoutineCompleted = (routineId: string) => {
@@ -746,8 +752,15 @@ export default function Home() {
   };
 
   const saveRoutineEdit = (routineId: string) => {
-    if (!editingRoutineTitle.trim()) return;
-    updateRoutines(routines.map(r => r.id === routineId ? { ...r, title: editingRoutineTitle.trim(), description: editingRoutineDescription.trim() || undefined } : r));
+    const trimmedTitle = editingRoutineTitle.trim().slice(0, 50);
+    const trimmedDesc = editingRoutineDescription.trim().slice(0, 200);
+    if (!trimmedTitle) return;
+    updateRoutines(routines.map(r => r.id === routineId ? { 
+      ...r, 
+      title: trimmedTitle, 
+      description: trimmedDesc || undefined,
+      category: editingRoutineCategory || "その他"
+    } : r));
     setEditingRoutineId(null);
     setEditingRoutineTitle("");
     setEditingRoutineDescription("");
@@ -1141,6 +1154,21 @@ export default function Home() {
       if (pa !== pb) return pa - pb;
       return b.createdAt - a.createdAt;
     });
+
+  const safeRoutines = (Array.isArray(routines) ? routines : []).map((r) => {
+    if (!r) return r;
+    const hasCategory = safeCategories.includes(r.category);
+    return hasCategory ? r : { ...r, category: "その他" };
+  });
+
+  const activeRoutineCategoryFilter = (routineCategoryFilter === "all" || safeCategories.includes(routineCategoryFilter))
+    ? routineCategoryFilter
+    : "all";
+
+  const filteredRoutines = safeRoutines.filter((r) => {
+    if (!r) return false;
+    return activeRoutineCategoryFilter === "all" ? true : r.category === activeRoutineCategoryFilter;
+  });
 
   const getDateStatus = (dueDateStr?: string, dueTimeStr?: string, completed?: boolean) => {
     if (!dueDateStr || completed) return { label: "", type: "normal" };
@@ -1949,7 +1977,7 @@ export default function Home() {
               <span>🔁</span> 習慣トラッカー
             </h2>
             
-            <form onSubmit={handleAddRoutine} style={{ display: "flex", flexDirection: "column", gap: "8px", marginBottom: "24px" }}>
+            <form onSubmit={handleAddRoutine} style={{ display: "flex", flexDirection: "column", gap: "10px", marginBottom: "24px" }}>
               <div style={{ display: "flex", gap: "8px" }}>
                 <input
                   type="text"
@@ -1984,10 +2012,50 @@ export default function Home() {
                   background: "rgba(0,0,0,0.05)", fontSize: "0.9rem", color: "var(--text-muted)", outline: "none"
                 }}
               />
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", alignItems: "center", marginTop: "4px" }}>
+                <span style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>カテゴリー:</span>
+                {safeCategories.map((cat) => (
+                  <button
+                    key={cat}
+                    type="button"
+                    className={`category-select-btn ${newRoutineCategory === cat ? "selected study" : ""}`}
+                    onClick={() => setNewRoutineCategory(cat)}
+                    style={{ fontSize: "0.8rem", padding: "6px 12px", borderRadius: "8px", height: "auto" }}
+                  >
+                    {cat}
+                  </button>
+                ))}
+              </div>
             </form>
 
+            {/* ── Category Tabs for Routines ── */}
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px", borderBottom: "1px solid rgba(255,255,255,0.05)", paddingBottom: "12px" }}>
+              <div className="category-filter-tabs" style={{ display: "flex", flexWrap: "wrap", rowGap: "4px" }}>
+                <button
+                  type="button"
+                  className={`cat-tab-btn ${activeRoutineCategoryFilter === "all" ? "active all" : ""}`}
+                  onClick={() => setRoutineCategoryFilter("all")}
+                >
+                  すべて
+                </button>
+                {safeCategories.map((cat) => (
+                  <button
+                    key={cat}
+                    type="button"
+                    className={`cat-tab-btn ${activeRoutineCategoryFilter === cat ? "active study" : ""}`}
+                    onClick={() => setRoutineCategoryFilter(cat)}
+                  >
+                    {cat}
+                  </button>
+                ))}
+              </div>
+              <span className="task-counter" style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>
+                {filteredRoutines.length > 0 ? `習慣: ${filteredRoutines.length}個` : "習慣なし"}
+              </span>
+            </div>
+
             <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-              {routines.map(routine => {
+              {filteredRoutines.map(routine => {
                 const past7Days = getLast7DaysJST();
                 const isCompletedToday = routine.completedDates.includes(getJSTTodayISO());
                 
@@ -2017,7 +2085,21 @@ export default function Home() {
                             onKeyDown={(e) => { if (e.key === "Enter") saveRoutineEdit(routine.id); else if (e.key === "Escape") setEditingRoutineId(null); }}
                             style={{ padding: "8px 12px", borderRadius: "8px", border: "1px solid rgba(255,255,255,0.1)", background: "rgba(0,0,0,0.1)", color: "var(--text)", outline: "none", fontSize: "0.9rem" }}
                           />
-                          <div style={{ display: "flex", gap: "8px", justifyContent: "flex-end" }}>
+                          <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", alignItems: "center", marginTop: "4px" }}>
+                            <span style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}>カテゴリー:</span>
+                            {safeCategories.map((cat) => (
+                              <button
+                                key={cat}
+                                type="button"
+                                className={`category-select-btn ${editingRoutineCategory === cat ? "selected study" : ""}`}
+                                onClick={() => setEditingRoutineCategory(cat)}
+                                style={{ fontSize: "0.75rem", padding: "4px 8px", borderRadius: "6px", height: "auto" }}
+                              >
+                                {cat}
+                              </button>
+                            ))}
+                          </div>
+                          <div style={{ display: "flex", gap: "8px", justifyContent: "flex-end", marginTop: "4px" }}>
                             <button onClick={() => saveRoutineEdit(routine.id)} style={{ background: "var(--primary)", color: "#fff", border: "none", padding: "8px 16px", borderRadius: "8px", cursor: "pointer", fontWeight: "bold" }}>保存</button>
                             <button onClick={() => setEditingRoutineId(null)} style={{ background: "rgba(255,255,255,0.1)", color: "var(--text)", border: "none", padding: "8px 16px", borderRadius: "8px", cursor: "pointer" }}>キャンセル</button>
                           </div>
@@ -2029,9 +2111,14 @@ export default function Home() {
                               type="checkbox" checked={isCompletedToday} onChange={() => toggleRoutineCompleted(routine.id)}
                               style={{ width: "24px", height: "24px", cursor: "pointer", accentColor: "var(--primary)", marginTop: "4px" }}
                             />
-                            <span style={{ display: "flex", flexDirection: "column", gap: "2px", flex: 1 }}>
-                              <span style={{ fontSize: "1.1rem", fontWeight: 500, color: isCompletedToday ? "var(--text-muted)" : "var(--text)", textDecoration: isCompletedToday ? "line-through" : "none", transition: "all 0.3s" }}>
-                                {routine.title}
+                            <span style={{ display: "flex", flexDirection: "column", gap: "4px", flex: 1 }}>
+                              <span style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                                <span style={{ fontSize: "1.1rem", fontWeight: 500, color: isCompletedToday ? "var(--text-muted)" : "var(--text)", textDecoration: isCompletedToday ? "line-through" : "none", transition: "all 0.3s" }}>
+                                  {routine.title}
+                                </span>
+                                <span className={`cat-badge ${routine.category === "勉強用" ? "study" : "other"}`}>
+                                  {routine.category || "その他"}
+                                </span>
                               </span>
                               {routine.description && (
                                 <span style={{ fontSize: "0.85rem", color: isCompletedToday ? "var(--text-muted)" : "var(--text-muted)" }}>
@@ -2041,7 +2128,16 @@ export default function Home() {
                             </span>
                           </label>
                           <div style={{ display: "flex", gap: "4px", alignSelf: "flex-start" }}>
-                            <button onClick={() => { setEditingRoutineId(routine.id); setEditingRoutineTitle(routine.title); setEditingRoutineDescription(routine.description || ""); }} style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", padding: "8px", opacity: 0.6 }} title="編集">✏️</button>
+                            <button
+                              onClick={() => {
+                                setEditingRoutineId(routine.id);
+                                setEditingRoutineTitle(routine.title);
+                                setEditingRoutineDescription(routine.description || "");
+                                setEditingRoutineCategory(routine.category || "その他");
+                              }}
+                              style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", padding: "8px", opacity: 0.6 }}
+                              title="編集"
+                            >✏️</button>
                             <button onClick={() => deleteRoutine(routine.id)} style={{ background: "none", border: "none", color: "var(--danger)", cursor: "pointer", padding: "8px", opacity: 0.6 }} title="削除">🗑️</button>
                           </div>
                         </>
@@ -2073,10 +2169,14 @@ export default function Home() {
                   </div>
                 );
               })}
-              {routines.length === 0 && (
+              {filteredRoutines.length === 0 && (
                 <div style={{ textAlign: "center", padding: "40px", color: "var(--text-muted)" }}>
                   <span style={{ fontSize: "2rem" }}>🌱</span>
-                  <p>まだ習慣が登録されていません。<br/>毎日のルーティンを追加してみましょう。</p>
+                  <p>
+                    {activeRoutineCategoryFilter === "all"
+                      ? "まだ習慣が登録されていません。毎日のルーティンを追加してみましょう。"
+                      : `「${activeRoutineCategoryFilter}」の習慣はありません。`}
+                  </p>
                 </div>
               )}
             </div>
