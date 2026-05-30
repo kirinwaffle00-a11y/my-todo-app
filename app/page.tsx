@@ -2058,7 +2058,6 @@ export default function Home() {
           {tasks.length > 0 ? (
             <MindMapView
               tasks={tasks}
-              rootTaskId={tasks.find(t => !t.parentId)?.id || tasks[0].id}
               onClose={() => setCurrentView("todo")}
               onToggleComplete={(id) => handleToggleComplete(id)}
               onOpenEdit={(task) => handleOpenEdit(task, { stopPropagation: () => {} } as React.MouseEvent)}
@@ -2423,7 +2422,7 @@ export default function Home() {
       {mapRootTaskId && (
         <MindMapView
           tasks={tasks}
-          rootTaskId={mapRootTaskId}
+          rootTaskIds={[mapRootTaskId]}
           onClose={() => setMapRootTaskId(null)}
           onToggleComplete={(id) => handleToggleComplete(id)}
           onOpenEdit={(task) => handleOpenEdit(task, { stopPropagation: () => {} } as React.MouseEvent)}

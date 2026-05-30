@@ -5,7 +5,7 @@ import type { Task } from "../page";
 
 interface MindMapViewProps {
   tasks: Task[];
-  rootTaskId: string;
+  rootTaskIds?: string[];
   onClose: () => void;
   onToggleComplete: (id: string) => void;
   onOpenEdit: (task: Task) => void;
@@ -98,7 +98,7 @@ const PRIORITY_COLORS: Record<string, string> = {
 
 export default function MindMapView({
   tasks,
-  rootTaskId,
+  rootTaskIds,
   onClose,
   onToggleComplete,
   onOpenEdit,
@@ -123,16 +123,32 @@ export default function MindMapView({
   };
 
   // Build layout
-  const rootNode = buildTree(rootTaskId, tasks, collapsedIds, 0);
+  const rootIds = rootTaskIds || tasks.filter((t) => !t.parentId).map((t) => t.id);
+  const childNodes = rootIds.map((id) => buildTree(id, tasks, collapsedIds, 0)).filter(Boolean) as LayoutNode[];
+
+  const totalChildrenHeight =
+    childNodes.length > 0
+      ? childNodes.reduce((sum, n) => sum + n.height, 0) + (childNodes.length - 1) * V_GAP
+      : 0;
+
+  const virtualRoot: LayoutNode = {
+    task: { id: "VIRTUAL_ROOT", text: "", completed: false, category: "", priority: "medium", createdAt: 0 },
+    x: -(NODE_WIDTH + H_GAP),
+    y: 0,
+    width: 0,
+    height: totalChildrenHeight,
+    children: childNodes,
+  };
+
   let allNodes: LayoutNode[] = [];
   let edges: Array<{ from: LayoutNode; to: LayoutNode }> = [];
   let totalHeight = 800;
 
-  if (rootNode) {
-    assignY(rootNode, 0);
-    allNodes = flattenTree(rootNode);
-    edges = collectEdges(rootNode);
-    totalHeight = Math.max(800, rootNode.height + 80);
+  if (virtualRoot.children.length > 0) {
+    assignY(virtualRoot, 0);
+    allNodes = virtualRoot.children.flatMap(flattenTree);
+    edges = virtualRoot.children.flatMap(collectEdges);
+    totalHeight = Math.max(800, virtualRoot.height + 80);
   }
 
   // Recalculate canvas size
@@ -142,13 +158,14 @@ export default function MindMapView({
     const maxY = Math.max(...allNodes.map((n) => n.y + NODE_HEIGHT));
     setCanvasSize({ width: maxX + 100, height: Math.max(maxY + 100, 600) });
     // Center vertically
-    if (containerRef.current && rootNode) {
-      const midY = rootNode.y + NODE_HEIGHT / 2;
+    if (containerRef.current && allNodes.length > 0) {
+      const minY = Math.min(...allNodes.map(n => n.y));
+      const midY = (minY + maxY) / 2;
       const containerH = containerRef.current.clientHeight;
       setPan((p) => ({ ...p, y: containerH / 2 - midY }));
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [collapsedIds, tasks, rootTaskId]);
+  }, [collapsedIds, tasks, rootTaskIds]);
 
   // Mouse pan handlers
   const onMouseDown = useCallback((e: React.MouseEvent) => {
@@ -355,7 +372,7 @@ export default function MindMapView({
             const children = tasks.filter((t) => t.parentId === task.id);
             const hasChildren = children.length > 0 || tasks.some((t) => t.parentId === task.id);
             const isCollapsed = collapsedIds.has(task.id);
-            const isRoot = task.id === rootTaskId;
+            const isRoot = rootIds.includes(task.id);
             const priorityColor = PRIORITY_COLORS[task.priority ?? "medium"];
             const completedChildren = tasks.filter((t) => t.parentId === task.id && t.completed).length;
             const totalChildren = tasks.filter((t) => t.parentId === task.id).length;
