@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "../../lib/authOptions";
+import { logger } from "../../lib/logger";
 
 const GCAL_API = "https://www.googleapis.com/calendar/v3/calendars/primary/events";
 
@@ -61,8 +62,8 @@ export async function POST(request: Request) {
 
   if (!res.ok) {
     const err = await res.text();
-    console.error("Google Calendar API error (POST):", err);
-    return NextResponse.json({ error: err }, { status: res.status });
+    logger.error({ action: "google-calendar/POST", status: "error", detail: err });
+    return NextResponse.json({ error: "Failed to create Google Calendar event" }, { status: res.status });
   }
 
   const created = await res.json();
@@ -91,8 +92,8 @@ export async function DELETE(request: Request) {
   // 404 = already deleted, treat as success
   if (!res.ok && res.status !== 404) {
     const err = await res.text();
-    console.error("Google Calendar API error (DELETE):", err);
-    return NextResponse.json({ error: err }, { status: res.status });
+    logger.error({ action: "google-calendar/DELETE", status: "error", detail: err });
+    return NextResponse.json({ error: "Failed to delete Google Calendar event" }, { status: res.status });
   }
 
   return NextResponse.json({ success: true });
