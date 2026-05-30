@@ -21,6 +21,7 @@ const MAX_CATEGORY_LEN = 50;
 
 const DEFAULT_STATE: UserState = {
   tasks: [],
+  routines: [],
   categories: ["勉強用", "その他"],
   discordWebhookUrl: "",
   discordNotifyTime: "08:00",
@@ -40,6 +41,18 @@ function sanitizeTask(t: Record<string, unknown>): Record<string, unknown> | nul
   };
 }
 
+function sanitizeRoutine(r: Record<string, unknown>): Record<string, unknown> | null {
+  if (!r || typeof r !== "object") return null;
+  return {
+    ...r,
+    title: typeof r.title === "string" ? r.title.slice(0, MAX_TEXT_LEN) : "",
+    category: typeof r.category === "string" ? r.category.slice(0, MAX_CATEGORY_LEN) : "その他",
+    completedDates: Array.isArray(r.completedDates) 
+      ? r.completedDates.filter(d => typeof d === "string").slice(0, 1000) 
+      : [],
+  };
+}
+
 async function loadGuestState(): Promise<UserState> {
   try {
     await fs.mkdir(DATA_DIR, { recursive: true });
@@ -50,6 +63,7 @@ async function loadGuestState(): Promise<UserState> {
     }
     return {
       tasks: Array.isArray(parsed.tasks) ? parsed.tasks : [],
+      routines: Array.isArray(parsed.routines) ? parsed.routines : [],
       categories: Array.isArray(parsed.categories) ? parsed.categories : DEFAULT_STATE.categories,
       discordWebhookUrl: parsed.discordWebhookUrl ?? "",
       discordNotifyTime: parsed.discordNotifyTime ?? "08:00",
@@ -112,11 +126,18 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: `Category count exceeds maximum (${MAX_CATEGORIES})` }, { status: 400 });
     }
 
+    const rawRoutines = Array.isArray(body.routines) ? body.routines : [];
+    if (rawRoutines.length > 100) { // arbitrary limit for routines
+      return NextResponse.json({ error: `Routine count exceeds maximum (100)` }, { status: 400 });
+    }
+
     // [H-3] 各タスクフィールドのサニタイズ（長さ切り詰め）
     const sanitizedTasks = rawTasks.map(sanitizeTask).filter(Boolean);
+    const sanitizedRoutines = rawRoutines.map(sanitizeRoutine).filter(Boolean);
 
     const state: UserState = {
-      tasks: sanitizedTasks,
+      tasks: sanitizedTasks as any, // type assertion for simplicity
+      routines: sanitizedRoutines as any,
       categories: rawCats
         .filter((c: unknown) => typeof c === "string")
         .map((c: string) => c.slice(0, MAX_CATEGORY_LEN)),
@@ -129,7 +150,8 @@ export async function POST(request: Request) {
       taskVelocityPerHour: typeof body.taskVelocityPerHour === "number"
         ? Math.max(0, Math.min(1000, body.taskVelocityPerHour)) // 0-1000 の範囲に制限
         : 60,
-      updatedAt: typeof body.updatedAt === "number" ? body.updatedAt : Date.now(),
+      tasksUpdatedAt: typeof body.tasksUpdatedAt === "number" ? body.tasksUpdatedAt : Date.now(),
+      routinesUpdatedAt: typeof body.routinesUpdatedAt === "number" ? body.routinesUpdatedAt : Date.now(),
     };
 
     await setUserState(userId, state);

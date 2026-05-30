@@ -32,7 +32,6 @@ export interface Task {
   startDate?: string;
   dueDate?: string;
   dueTime?: string;
-  isRoutine: boolean;
   createdAt: number;
   startedAt?: number;
   estimatedMinutes?: number;
@@ -44,8 +43,16 @@ export interface Task {
   notified?: boolean; // Discord notified
 }
 
+export interface Routine {
+  id: string;
+  title: string;
+  category: string;
+  completedDates: string[];
+}
+
 export interface UserState {
   tasks: Task[];
+  routines: Routine[];
   categories: string[];
   discordWebhookUrl?: string;
   discordNotifyTime?: string;
@@ -53,11 +60,13 @@ export interface UserState {
   averageBedtime: string;
   taskVelocityPerHour: number;
   lastDiscordDailySentDate?: string;
-  updatedAt?: number;
+  tasksUpdatedAt?: number;
+  routinesUpdatedAt?: number;
 }
 
 const DEFAULT_STATE: UserState = {
   tasks: [],
+  routines: [],
   categories: ["勉強用", "その他"],
   discordWebhookUrl: "",
   discordNotifyTime: "08:00",
@@ -160,13 +169,15 @@ export async function getUserState(userId: string): Promise<UserState & { initia
     }
     return {
       tasks: Array.isArray(raw.tasks) ? raw.tasks : [],
+      routines: Array.isArray(raw.routines) ? raw.routines : [],
       categories: Array.isArray(raw.categories) ? raw.categories : DEFAULT_STATE.categories,
       discordWebhookUrl: raw.discordWebhookUrl ?? "",
       discordNotifyTime: raw.discordNotifyTime ?? "08:00",
       disciplineScore: raw.disciplineScore ?? 0,
       averageBedtime: raw.averageBedtime ?? "23:30",
       taskVelocityPerHour: raw.taskVelocityPerHour ?? 60,
-      updatedAt: raw.updatedAt,
+      tasksUpdatedAt: raw.tasksUpdatedAt,
+      routinesUpdatedAt: raw.routinesUpdatedAt,
       initialized: true, // Key exists — trust this data (even if tasks is empty)
     };
   } catch (e) {

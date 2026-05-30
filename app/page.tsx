@@ -14,8 +14,6 @@ export interface Task {
   completed: boolean;
   category: string;
   priority: "high" | "medium" | "low";
-  isRoutine: boolean;
-  lastRoutineDate?: string; // "YYYY-MM-DD" — the date routine was last completed
   startDate?: string;
   dueDate?: string;
   dueTime?: string;
@@ -29,6 +27,13 @@ export interface Task {
   parentTaskId?: string;
   notToDos?: { id: string; text: string; kept?: boolean }[];
   penalty?: { type: "screen_time_lock" | "other"; targetApp?: string; status: "active" | "executed" | "cleared" };
+}
+
+export interface Routine {
+  id: string;
+  title: string;
+  category: string;
+  completedDates: string[];
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -50,6 +55,7 @@ export default function Home() {
   const gcalEnabled = !!(session as { accessToken?: string })?.accessToken;
   // ── Sync States ──
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [routines, setRoutines] = useState<Routine[]>([]);
   const [categories, setCategories] = useState<string[]>(["勉強用", "その他"]);
   const [disciplineScore, setDisciplineScore] = useState(0);
   const [averageBedtime, setAverageBedtime] = useState("23:30");
@@ -81,7 +87,6 @@ export default function Home() {
   const [editStartDate, setEditStartDate] = useState("");
   const [editDueDate, setEditDueDate] = useState("");
   const [editDueTime, setEditDueTime] = useState("");
-  const [editIsRoutine, setEditIsRoutine] = useState(false);
   const [editEstimatedMinutes, setEditEstimatedMinutes] = useState<number | "">("");
   const [editNotToDosText, setEditNotToDosText] = useState("");
   const [editPenaltyType, setEditPenaltyType] = useState<"none" | "screen_time_lock" | "other">("none");
@@ -89,10 +94,10 @@ export default function Home() {
 
   // ── Form States ──
   const [inputText, setInputText] = useState("");
+  const [newRoutineTitle, setNewRoutineTitle] = useState("");
   const [description, setDescription] = useState("");
   const [category, setCategory] = useState("勉強用");
   const [priority, setPriority] = useState<Task["priority"]>("medium");
-  const [isRoutine, setIsRoutine] = useState(false);
   const [startDate, setStartDate] = useState("");
   const [dueDate, setDueDate] = useState("");
   const [dueTime, setDueTime] = useState("");
@@ -136,11 +141,17 @@ export default function Home() {
   const categoryRef = useRef(category);
   useEffect(() => { categoryRef.current = category; }, [category]);
 
+  const tasksRef = useRef(tasks);
+  const routinesRef = useRef(routines);
+  useEffect(() => { tasksRef.current = tasks; }, [tasks]);
+  useEffect(() => { routinesRef.current = routines; }, [routines]);
+
   const [isFetched, setIsFetched] = useState(false);
   const isFetchedRef = useRef(false);
 
   // ── localStorage ──────────────────────────────────────────────────────────
   const LS_TASKS = "focustodo_tasks";
+  const LS_ROUTINES = "focustodo_routines";
   const LS_CATS  = "focustodo_categories";
   const LS_LAST_WRITE = "focustodo_last_write";
   const LS_DISCORD_WEBHOOK = "focustodo_discord_webhook";
@@ -148,15 +159,18 @@ export default function Home() {
   const LS_DISCIPLINE = "focustodo_discipline";
   const LS_BEDTIME = "focustodo_bedtime";
   const LS_VELOCITY = "focustodo_velocity";
+  const LS_TASKS_UPDATED = "focustodo_tasks_updated_at";
+  const LS_ROUTINES_UPDATED = "focustodo_routines_updated_at";
 
   const loadFromLocalStorage = (): { 
-    tasks: Task[]; categories: string[]; lastWrite: number; 
+    tasks: Task[]; routines: Routine[]; categories: string[]; lastWrite: number; 
     discordWebhookUrl: string; discordNotifyTime: string;
     disciplineScore: number; averageBedtime: string; taskVelocityPerHour: number;
-    updatedAt: number;
+    tasksUpdatedAt: number; routinesUpdatedAt: number;
   } => {
     try {
       const t = localStorage.getItem(LS_TASKS);
+      const r = localStorage.getItem(LS_ROUTINES);
       const c = localStorage.getItem(LS_CATS);
       const w = localStorage.getItem(LS_LAST_WRITE);
       const dw = localStorage.getItem(LS_DISCORD_WEBHOOK) || "";
@@ -165,16 +179,21 @@ export default function Home() {
       const bed = localStorage.getItem(LS_BEDTIME);
       const vel = localStorage.getItem(LS_VELOCITY);
       
-      const u = localStorage.getItem("focustodo_updated_at");
+      const tu = localStorage.getItem(LS_TASKS_UPDATED);
+      const ru = localStorage.getItem(LS_ROUTINES_UPDATED);
       
       const rawTasks: Task[] = t ? JSON.parse(t) : [];
-      const migratedTasks = rawTasks.map((task: Partial<Task>) => ({
-        priority: "medium" as Task["priority"],
-        isRoutine: false,
-        ...task,
-      } as Task));
+      const migratedTasks = rawTasks.map((task: Partial<Task>) => {
+        // Migration: delete old isRoutine from task if present
+        const { isRoutine, lastRoutineDate, ...rest } = task as any;
+        return {
+          priority: "medium" as Task["priority"],
+          ...rest,
+        } as Task;
+      });
       return {
         tasks: migratedTasks,
+        routines: r ? JSON.parse(r) : [],
         categories: c ? JSON.parse(c) : ["勉強用", "その他"],
         lastWrite: w ? Number(w) : 0,
         discordWebhookUrl: dw,
@@ -182,26 +201,28 @@ export default function Home() {
         disciplineScore: disc ? Number(disc) : 0,
         averageBedtime: bed || "23:30",
         taskVelocityPerHour: vel ? Number(vel) : 60,
-        updatedAt: u ? Number(u) : 0,
+        tasksUpdatedAt: tu ? Number(tu) : 0,
+        routinesUpdatedAt: ru ? Number(ru) : 0,
       };
     } catch {
       return { 
-        tasks: [], categories: ["勉強用", "その他"], lastWrite: 0, 
+        tasks: [], routines: [], categories: ["勉強用", "その他"], lastWrite: 0, 
         discordWebhookUrl: "", discordNotifyTime: "08:00",
         disciplineScore: 0, averageBedtime: "23:30", taskVelocityPerHour: 60,
-        updatedAt: 0
+        tasksUpdatedAt: 0, routinesUpdatedAt: 0
       };
     }
   };
 
   const saveToLocalStorage = (
-    t: Task[], c: string[], dw?: string, dt?: string, 
+    t: Task[], r: Routine[], c: string[], dw?: string, dt?: string, 
     disciplineScore?: number, averageBedtime?: string, taskVelocityPerHour?: number,
-    updatedAt?: number
+    tasksUpdatedAt?: number, routinesUpdatedAt?: number
   ) => {
     try {
       const now = Date.now();
       localStorage.setItem(LS_TASKS, JSON.stringify(t));
+      localStorage.setItem(LS_ROUTINES, JSON.stringify(r));
       localStorage.setItem(LS_CATS, JSON.stringify(c));
       localStorage.setItem(LS_LAST_WRITE, String(now));
       if (dw !== undefined) localStorage.setItem(LS_DISCORD_WEBHOOK, dw);
@@ -209,20 +230,12 @@ export default function Home() {
       if (disciplineScore !== undefined) localStorage.setItem(LS_DISCIPLINE, String(disciplineScore));
       if (averageBedtime !== undefined) localStorage.setItem(LS_BEDTIME, averageBedtime);
       if (taskVelocityPerHour !== undefined) localStorage.setItem(LS_VELOCITY, String(taskVelocityPerHour));
-      if (updatedAt !== undefined) localStorage.setItem("focustodo_updated_at", String(updatedAt));
+      if (tasksUpdatedAt !== undefined) localStorage.setItem(LS_TASKS_UPDATED, String(tasksUpdatedAt));
+      if (routinesUpdatedAt !== undefined) localStorage.setItem(LS_ROUTINES_UPDATED, String(routinesUpdatedAt));
     } catch { /* localStorage unavailable */ }
   };
 
-  // ── Routine auto-restore ──────────────────────────────────────────────────
-  const applyRoutineRestore = (taskList: Task[]): Task[] => {
-    const today = todayISO();
-    return taskList.map((task) => {
-      if (task.isRoutine && task.completed && task.lastRoutineDate !== today) {
-        return { ...task, completed: false, lastRoutineDate: undefined, notified: false };
-      }
-      return task;
-    });
-  };
+
 
   // ── Server Fetch ──────────────────────────────────────────────────────────
   const fetchState = useCallback(async () => {
@@ -240,10 +253,10 @@ export default function Home() {
 
       const serverTasks: Task[] = (data.tasks || []).map((task: Partial<Task>) => ({
         priority: "medium" as Task["priority"],
-        isRoutine: false,
         ...task,
         category: task.category === "study" ? "勉強用" : task.category === "other" ? "その他" : task.category,
       } as Task));
+      const serverRoutines: Routine[] = data.routines || [];
       const serverCats: string[] = (data.categories || ["勉強用", "その他"]).map((c: string) =>
         c === "study" ? "勉強用" : c === "other" ? "その他" : c
       );
@@ -252,92 +265,112 @@ export default function Home() {
       const serverDiscipline = data.disciplineScore || 0;
       const serverBedtime = data.averageBedtime || "23:30";
       const serverVelocity = data.taskVelocityPerHour || 60;
-      const serverUpdatedAt = data.updatedAt || 0;
+      const serverTasksUpdatedAt = data.tasksUpdatedAt || 0;
+      const serverRoutinesUpdatedAt = data.routinesUpdatedAt || 0;
 
       const local = loadFromLocalStorage();
-      const localUpdatedAt = local.updatedAt || 0;
+      const localTasksUpdatedAt = local.tasksUpdatedAt || 0;
+      const localRoutinesUpdatedAt = local.routinesUpdatedAt || 0;
       
       const serverHasData = data.initialized === true;
       
       let finalTasks: Task[];
+      let finalRoutines: Routine[];
       let finalCats: string[];
       let finalWebhook: string;
       let finalTime: string;
       let finalDiscipline: number;
       let finalBedtime: string;
       let finalVelocity: number;
-      let finalUpdatedAt: number;
+      let finalTasksUpdatedAt: number;
+      let finalRoutinesUpdatedAt: number;
 
       if (!serverHasData) {
         // Server has no data (new user) => Use local
-        finalTasks = applyRoutineRestore(local.tasks);
+        finalTasks = local.tasks;
+        finalRoutines = local.routines;
         finalCats = local.categories;
         finalWebhook = local.discordWebhookUrl;
         finalTime = local.discordNotifyTime;
         finalDiscipline = local.disciplineScore;
         finalBedtime = local.averageBedtime;
         finalVelocity = local.taskVelocityPerHour;
-        finalUpdatedAt = localUpdatedAt || Date.now();
+        finalTasksUpdatedAt = localTasksUpdatedAt || Date.now();
+        finalRoutinesUpdatedAt = localRoutinesUpdatedAt || Date.now();
       } else {
-        // Server is initialized, use timestamp-based resolution
-        if (localUpdatedAt > serverUpdatedAt) {
-          // Local is newer (e.g. offline edits) => Use local
-          finalTasks = applyRoutineRestore(local.tasks);
+        // Server is initialized, use independent timestamp-based resolution
+        if (localTasksUpdatedAt > serverTasksUpdatedAt) {
+          finalTasks = local.tasks;
+          finalTasksUpdatedAt = localTasksUpdatedAt;
+        } else {
+          finalTasks = serverTasks;
+          finalTasksUpdatedAt = serverTasksUpdatedAt;
+        }
+
+        if (localRoutinesUpdatedAt > serverRoutinesUpdatedAt) {
+          finalRoutines = local.routines;
+          finalRoutinesUpdatedAt = localRoutinesUpdatedAt;
+        } else {
+          finalRoutines = serverRoutines;
+          finalRoutinesUpdatedAt = serverRoutinesUpdatedAt;
+        }
+
+        // For other shared settings, assume server is truth for now (or local if offline edit, simplify by tying to tasks update)
+        if (localTasksUpdatedAt > serverTasksUpdatedAt) {
           finalCats = local.categories;
           finalWebhook = local.discordWebhookUrl;
           finalTime = local.discordNotifyTime;
           finalDiscipline = local.disciplineScore;
           finalBedtime = local.averageBedtime;
           finalVelocity = local.taskVelocityPerHour;
-          finalUpdatedAt = localUpdatedAt;
         } else {
-          // Server is newer or equal => Use server
-          finalTasks = applyRoutineRestore(serverTasks);
           finalCats = serverCats;
           finalWebhook = serverWebhook;
           finalTime = serverTime;
           finalDiscipline = serverDiscipline;
           finalBedtime = serverBedtime;
           finalVelocity = serverVelocity;
-          finalUpdatedAt = serverUpdatedAt;
         }
       }
 
       setTasks(finalTasks);
+      setRoutines(finalRoutines);
       setCategories(finalCats);
       setDiscordWebhookUrl(finalWebhook);
       setDiscordNotifyTime(finalTime);
       setDisciplineScore(finalDiscipline);
       setAverageBedtime(finalBedtime);
       setTaskVelocityPerHour(finalVelocity);
-      saveToLocalStorage(finalTasks, finalCats, finalWebhook, finalTime, finalDiscipline, finalBedtime, finalVelocity, finalUpdatedAt);
+      saveToLocalStorage(finalTasks, finalRoutines, finalCats, finalWebhook, finalTime, finalDiscipline, finalBedtime, finalVelocity, finalTasksUpdatedAt, finalRoutinesUpdatedAt);
       lastLocalWrite.current = Date.now();
       if (!finalCats.includes(categoryRef.current) && finalCats.length > 0) {
         setCategory(finalCats[0]);
       }
       
       // Upload to server if local was newer or server was uninitialized
-      if (!serverHasData || localUpdatedAt > serverUpdatedAt) {
+      if (!serverHasData || localTasksUpdatedAt > serverTasksUpdatedAt || localRoutinesUpdatedAt > serverRoutinesUpdatedAt) {
          fetch("/api/tasks", {
            method: "POST",
            headers: { "Content-Type": "application/json" },
            body: JSON.stringify({
              tasks: finalTasks,
+             routines: finalRoutines,
              categories: finalCats,
              discordWebhookUrl: finalWebhook,
              discordNotifyTime: finalTime,
              disciplineScore: finalDiscipline,
              averageBedtime: finalBedtime,
              taskVelocityPerHour: finalVelocity,
-             updatedAt: finalUpdatedAt
+             tasksUpdatedAt: finalTasksUpdatedAt,
+             routinesUpdatedAt: finalRoutinesUpdatedAt
            }),
          }).catch(() => {});
       }
-    } catch {
       serverAvailable.current = false;
       if (!isFetchedRef.current) {
          const local = loadFromLocalStorage();
-         setTasks(applyRoutineRestore(local.tasks));
+         setTasks(local.tasks);
+         setRoutines(local.routines);
          setCategories(local.categories);
          setDiscordWebhookUrl(local.discordWebhookUrl);
          setDiscordNotifyTime(local.discordNotifyTime);
@@ -361,7 +394,8 @@ export default function Home() {
     if (status === "unauthenticated") {
       if (!isFetchedRef.current) {
         const local = loadFromLocalStorage();
-        setTasks(applyRoutineRestore(local.tasks));
+        setTasks(local.tasks);
+        setRoutines(local.routines);
         setCategories(local.categories);
         setDiscordWebhookUrl(local.discordWebhookUrl);
         setDiscordNotifyTime(local.discordNotifyTime);
@@ -558,7 +592,9 @@ export default function Home() {
 
   // ── Save ──────────────────────────────────────────────────────────────────
   async function saveStateToServer(
-    updatedTasks: Task[], updatedCategories: string[], 
+    updatedTasks: Task[] | undefined, 
+    updatedRoutines: Routine[] | undefined,
+    updatedCategories: string[], 
     dw?: string, dt?: string, disc?: number, bed?: string, vel?: number
   ) {
     if (!isFetchedRef.current) {
@@ -566,14 +602,21 @@ export default function Home() {
       return;
     }
     lastLocalWrite.current = Date.now();
+    
+    const finalTasks = updatedTasks !== undefined ? updatedTasks : tasksRef.current;
+    const finalRoutines = updatedRoutines !== undefined ? updatedRoutines : routinesRef.current;
+
     const webhook = dw !== undefined ? dw : discordWebhookUrl;
     const notifyTime = dt !== undefined ? dt : discordNotifyTime;
     const finalDisc = disc !== undefined ? disc : disciplineScore;
     const finalBed = bed !== undefined ? bed : averageBedtime;
     const finalVel = vel !== undefined ? vel : taskVelocityPerHour;
-    const currentUpdatedAt = Date.now();
     
-    saveToLocalStorage(updatedTasks, updatedCategories, webhook, notifyTime, finalDisc, finalBed, finalVel, currentUpdatedAt);
+    const local = loadFromLocalStorage();
+    const currentTasksUpdatedAt = updatedTasks !== undefined ? Date.now() : local.tasksUpdatedAt;
+    const currentRoutinesUpdatedAt = updatedRoutines !== undefined ? Date.now() : local.routinesUpdatedAt;
+    
+    saveToLocalStorage(finalTasks, finalRoutines, updatedCategories, webhook, notifyTime, finalDisc, finalBed, finalVel, currentTasksUpdatedAt, currentRoutinesUpdatedAt);
     
     if (status === "unauthenticated") return; // Guest mode does not save to server
 
@@ -582,18 +625,20 @@ export default function Home() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
-          tasks: updatedTasks, 
+          tasks: finalTasks, 
+          routines: finalRoutines,
           categories: updatedCategories,
           discordWebhookUrl: webhook,
           discordNotifyTime: notifyTime,
           disciplineScore: finalDisc,
           averageBedtime: finalBed,
           taskVelocityPerHour: finalVel,
-          updatedAt: currentUpdatedAt
+          tasksUpdatedAt: currentTasksUpdatedAt,
+          routinesUpdatedAt: currentRoutinesUpdatedAt
         }),
       });
     } catch { /* localStorage already saved */ }
-  };
+  }
 
   function updateState(
     newTasks: Task[], newCategories: string[], 
@@ -606,10 +651,58 @@ export default function Home() {
     if (disc !== undefined) setDisciplineScore(disc);
     if (bed !== undefined) setAverageBedtime(bed);
     if (vel !== undefined) setTaskVelocityPerHour(vel);
-    saveStateToServer(newTasks, newCategories, dw, dt, disc, bed, vel);
-  };
+    saveStateToServer(newTasks, undefined, newCategories, dw, dt, disc, bed, vel);
+  }
+
+  function updateRoutines(newRoutines: Routine[]) {
+    setRoutines(newRoutines);
+    saveStateToServer(undefined, newRoutines, categories, discordWebhookUrl, discordNotifyTime, disciplineScore, averageBedtime, taskVelocityPerHour);
+  }
 
   // ── Handlers ──────────────────────────────────────────────────────────────
+  const handleAddRoutine = (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmed = newRoutineTitle.trim();
+    if (!trimmed) return;
+    const newRoutine: Routine = {
+      id: Date.now().toString(),
+      title: trimmed,
+      category: "その他",
+      completedDates: [],
+    };
+    updateRoutines([...routines, newRoutine]);
+    setNewRoutineTitle("");
+  };
+
+  const toggleRoutineCompleted = (routineId: string) => {
+    const today = todayISO();
+    let isNowCompleted = false;
+    const updated = routines.map((r) => {
+      if (r.id === routineId) {
+        const hasToday = r.completedDates.includes(today);
+        isNowCompleted = !hasToday;
+        return {
+          ...r,
+          completedDates: hasToday
+            ? r.completedDates.filter((d) => d !== today)
+            : [...r.completedDates, today],
+        };
+      }
+      return r;
+    });
+    
+    updateRoutines(updated);
+    
+    if (isNowCompleted) {
+      // Confetti intentionally omitted as it's not present in this file
+    }
+  };
+
+  const deleteRoutine = (routineId: string) => {
+    if (confirm("このルーティンを削除しますか？")) {
+      updateRoutines(routines.filter(r => r.id !== routineId));
+    }
+  };
   const handleAddTask = async (e: React.FormEvent) => {
     e.preventDefault();
     const trimmedText = inputText.trim();
@@ -621,7 +714,6 @@ export default function Home() {
       completed: false,
       category,
       priority,
-      isRoutine,
       startDate: startDate || undefined,
       dueDate: dueDate || undefined,
       dueTime: dueTime || undefined,
@@ -661,7 +753,6 @@ export default function Home() {
     setDueDate("");
     setDueTime("");
     setPriority("medium");
-    setIsRoutine(false);
     setShowOptions(false);
     // iOS: blur any focused input to dismiss keyboard and reset zoom
     if (document.activeElement instanceof HTMLElement) {
@@ -679,7 +770,6 @@ export default function Home() {
       return {
         ...t,
         completed: newCompleted,
-        lastRoutineDate: newCompleted && t.isRoutine ? todayISO() : t.lastRoutineDate,
       };
     });
 
@@ -695,7 +785,7 @@ export default function Home() {
         const allCompleted = children.length > 0 && children.every(c => c.completed);
         
         if (allCompleted) {
-          updated = updated.map(t => t.id === pId ? { ...t, completed: true, lastRoutineDate: t.isRoutine ? todayISO() : t.lastRoutineDate } : t);
+          updated = updated.map(t => t.id === pId ? { ...t, completed: true } : t);
           currentParentId = parent.parentId;
         } else {
           break;
@@ -780,7 +870,6 @@ export default function Home() {
     setEditStartDate(task.startDate || "");
     setEditDueDate(task.dueDate || "");
     setEditDueTime(task.dueTime || "");
-    setEditIsRoutine(task.isRoutine);
     setEditEstimatedMinutes(task.estimatedMinutes || "");
     setEditNotToDosText(task.notToDos?.map(n => n.text).join("\n") || "");
     setEditPenaltyType(task.penalty?.type || "none");
@@ -813,7 +902,6 @@ export default function Home() {
       startDate: editStartDate || undefined,
       dueDate: editDueDate || undefined,
       dueTime: editDueTime || undefined,
-      isRoutine: editIsRoutine,
       estimatedMinutes: editEstimatedMinutes !== "" ? Number(editEstimatedMinutes) : undefined,
       notToDos: newNotToDos,
       penalty: newPenalty,
@@ -901,7 +989,6 @@ export default function Home() {
       text: `[極小ステップ] ${s}`,
       category: targetTask.category,
       priority: "medium", // Low barrier
-      isRoutine: false,
       completed: false,
       parentTaskId: targetTask.id,
       createdAt: Date.now(),
@@ -1073,8 +1160,6 @@ export default function Home() {
                       {progressText}
                     </span>
                   )}
-                  {/* Routine indicator */}
-                  {task.isRoutine && <span title="毎日ルーティン" style={{ fontSize: "0.75rem" }}>🔁</span>}
                   {/* Memo indicator */}
                   {task.description && (
                     <span className="has-desc-indicator" title="詳細メモあり">
@@ -1234,7 +1319,6 @@ export default function Home() {
                       completed: false,
                       category: task.category,
                       priority: task.priority,
-                      isRoutine: false,
                       parentId: task.id,
                       createdAt: Date.now()
                     };
@@ -1246,7 +1330,6 @@ export default function Home() {
                     setEditStartDate("");
                     setEditDueDate("");
                     setEditDueTime("");
-                    setEditIsRoutine(false);
                   }}
                   className="calendar-sync-btn" 
                   style={{ background: "transparent", border: "1px solid var(--border)", color: "var(--text)" }}
@@ -1379,7 +1462,7 @@ export default function Home() {
             >
               <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                 <circle cx="12" cy="12" r="3" />
-                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06-.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
               </svg>
               <span>設定</span>
             </button>
@@ -1588,6 +1671,114 @@ export default function Home() {
           </div>
 
 
+          {/* ── Daily Routines (Glassmorphism) ── */}
+          <div className="routines-card" style={{
+            background: "rgba(255, 255, 255, 0.6)",
+            backdropFilter: "blur(12px)",
+            WebkitBackdropFilter: "blur(12px)",
+            borderRadius: "16px",
+            padding: "20px",
+            boxShadow: "0 4px 20px rgba(0,0,0,0.03)",
+            border: "1px solid rgba(255,255,255,0.8)",
+            marginBottom: "24px",
+            display: "flex",
+            flexDirection: "column",
+            gap: "16px"
+          }}>
+            <h3 style={{ margin: 0, fontSize: "1.1rem", color: "var(--text-color)", display: "flex", alignItems: "center", gap: "8px" }}>
+              <span>🔁 毎日のルーティン</span>
+            </h3>
+            
+            <form onSubmit={handleAddRoutine} style={{ display: "flex", gap: "8px" }}>
+              <input
+                type="text"
+                placeholder="新しいルーティンを入力..."
+                value={newRoutineTitle}
+                onChange={(e) => setNewRoutineTitle(e.target.value)}
+                maxLength={50}
+                style={{
+                  flex: 1,
+                  padding: "10px 14px",
+                  borderRadius: "12px",
+                  border: "1px solid rgba(0,0,0,0.1)",
+                  background: "rgba(255,255,255,0.8)",
+                  fontSize: "0.95rem",
+                  outline: "none",
+                  transition: "border-color 0.2s"
+                }}
+              />
+              <button
+                type="submit"
+                disabled={!newRoutineTitle.trim()}
+                style={{
+                  padding: "0 16px",
+                  borderRadius: "12px",
+                  border: "none",
+                  background: "var(--primary-color)",
+                  color: "#fff",
+                  fontWeight: "bold",
+                  cursor: newRoutineTitle.trim() ? "pointer" : "not-allowed",
+                  opacity: newRoutineTitle.trim() ? 1 : 0.6,
+                  transition: "all 0.2s"
+                }}
+              >
+                追加
+              </button>
+            </form>
+
+            {routines.length > 0 && (
+              <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                {routines.map(routine => {
+                  const isCompletedToday = routine.completedDates.includes(todayISO());
+                  return (
+                    <div key={routine.id} style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      padding: "12px 14px",
+                      background: isCompletedToday ? "rgba(74, 222, 128, 0.1)" : "rgba(255,255,255,0.7)",
+                      borderRadius: "12px",
+                      border: isCompletedToday ? "1px solid rgba(74, 222, 128, 0.3)" : "1px solid rgba(0,0,0,0.05)",
+                      transition: "all 0.3s ease"
+                    }}>
+                      <label style={{ display: "flex", alignItems: "center", gap: "12px", cursor: "pointer", flex: 1 }}>
+                        <input
+                          type="checkbox"
+                          checked={isCompletedToday}
+                          onChange={() => toggleRoutineCompleted(routine.id)}
+                          style={{
+                            width: "20px", height: "20px", cursor: "pointer",
+                            accentColor: "var(--primary-color)"
+                          }}
+                        />
+                        <span style={{
+                          fontSize: "0.95rem",
+                          color: isCompletedToday ? "var(--text-muted)" : "var(--text-color)",
+                          textDecoration: isCompletedToday ? "line-through" : "none",
+                          transition: "all 0.3s"
+                        }}>
+                          {routine.title}
+                        </span>
+                      </label>
+                      <button
+                        onClick={() => deleteRoutine(routine.id)}
+                        title="ルーティンを削除"
+                        style={{
+                          background: "none", border: "none", cursor: "pointer",
+                          color: "var(--text-muted)", fontSize: "1rem", opacity: 0.6,
+                          padding: "4px"
+                        }}
+                      >
+                        🗑️
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+
           {/* ── Add Task Form ── */}
           <form onSubmit={handleAddTask} className="todo-form">
             <div className="input-row">
@@ -1699,22 +1890,6 @@ export default function Home() {
                     </div>
                   </div>
                 </div>
-
-                {/* Routine toggle */}
-                <label className="routine-toggle">
-                  <input
-                    type="checkbox"
-                    checked={isRoutine}
-                    onChange={(e) => setIsRoutine(e.target.checked)}
-                    className="routine-checkbox"
-                  />
-                  <span className="routine-toggle-track">
-                    <span className="routine-toggle-thumb" />
-                  </span>
-                  <span className="routine-label">
-                    🔁 毎日繰り返す（翌日に自動復活）
-                  </span>
-                </label>
               </div>
             )}
           </form>
@@ -1957,20 +2132,6 @@ export default function Home() {
 
                 </div>
               </div>
-
-              {/* Routine toggle */}
-              <label className="routine-toggle">
-                <input
-                  type="checkbox"
-                  checked={editIsRoutine}
-                  onChange={(e) => setEditIsRoutine(e.target.checked)}
-                  className="routine-checkbox"
-                />
-                <span className="routine-toggle-track">
-                  <span className="routine-toggle-thumb" />
-                </span>
-                <span className="routine-label">🔁 毎日繰り返す</span>
-              </label>
             </div>
 
             <div className="modal-footer">
@@ -2144,8 +2305,7 @@ export default function Home() {
               text: "新しい子タスク",
               completed: false,
               category: tasks.find(t => t.id === parentId)?.category || categories[0],
-              priority: tasks.find(t => t.id === parentId)?.priority || "medium",
-              isRoutine: false,
+              priority: "medium",
               parentId: parentId,
               createdAt: Date.now()
             };
@@ -2153,12 +2313,11 @@ export default function Home() {
             setEditText(tempTask.text);
             setEditDescription("");
             setEditCategory(tempTask.category);
-            setEditPriority(tempTask.priority);
+            setEditPriority(tempTask.priority as Task["priority"]);
             setEditParentId(tempTask.parentId || "");
             setEditStartDate("");
             setEditDueDate("");
             setEditDueTime("");
-            setEditIsRoutine(false);
           }}
         />
       )}
