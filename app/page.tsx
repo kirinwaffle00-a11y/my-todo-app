@@ -37,9 +37,35 @@ export interface Routine {
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
-const todayISO = () => {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+const RESET_HOUR = 0; // JST time to consider as the "next day" (e.g. 0 = Midnight JST)
+
+export const getJSTTodayISO = () => {
+  const now = new Date();
+  const jstTime = new Date(now.getTime() + 9 * 60 * 60 * 1000);
+  
+  if (jstTime.getUTCHours() < RESET_HOUR) {
+    jstTime.setUTCDate(jstTime.getUTCDate() - 1);
+  }
+  
+  return `${jstTime.getUTCFullYear()}-${String(jstTime.getUTCMonth() + 1).padStart(2, "0")}-${String(jstTime.getUTCDate()).padStart(2, "0")}`;
+};
+
+export const getLast7DaysJST = () => {
+  const dates = [];
+  const now = new Date();
+  
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date(now.getTime() + 9 * 60 * 60 * 1000);
+    if (d.getUTCHours() < RESET_HOUR) {
+      d.setUTCDate(d.getUTCDate() - 1);
+    }
+    d.setUTCDate(d.getUTCDate() - i);
+    const dateStr = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
+    const days = ["日", "月", "火", "水", "木", "金", "土"];
+    const dayOfWeek = days[d.getUTCDay()];
+    dates.push({ date: dateStr, label: dayOfWeek, isToday: i === 0 });
+  }
+  return dates;
 };
 
 const PRIORITY_LABEL: Record<Task["priority"], string> = {
@@ -54,6 +80,7 @@ export default function Home() {
   const { data: session, status } = useSession();
   const gcalEnabled = !!(session as { accessToken?: string })?.accessToken;
   // ── Sync States ──
+  const [currentView, setCurrentView] = useState<"todo" | "routine" | "tree">("todo");
   const [tasks, setTasks] = useState<Task[]>([]);
   const [routines, setRoutines] = useState<Routine[]>([]);
   const [categories, setCategories] = useState<string[]>(["勉強用", "その他"]);
@@ -675,7 +702,7 @@ export default function Home() {
   };
 
   const toggleRoutineCompleted = (routineId: string) => {
-    const today = todayISO();
+    const today = getJSTTodayISO();
     let isNowCompleted = false;
     const updated = routines.map((r) => {
       if (r.id === routineId) {
@@ -1487,7 +1514,38 @@ export default function Home() {
 
           </div>
         </div>
+
+        {/* View Navigation */}
+        <nav className="header-nav" style={{ display: "flex", gap: "8px", marginTop: "16px", overflowX: "auto", paddingBottom: "4px" }}>
+          <button
+            onClick={() => setCurrentView("todo")}
+            className={`nav-btn ${currentView === "todo" ? "active" : ""}`}
+            style={{ flex: 1, padding: "10px", borderRadius: "12px", border: "1px solid rgba(255,255,255,0.1)", background: currentView === "todo" ? "rgba(100,130,255,0.2)" : "var(--bg-glass)", color: currentView === "todo" ? "#c7d2fe" : "var(--text)", fontWeight: currentView === "todo" ? 700 : 500, cursor: "pointer", transition: "all 0.2s" }}
+          >
+            📋 TODO
+          </button>
+          <button
+            onClick={() => {
+              setCurrentView("tree");
+              setMapRootTaskId(null); // Optional: clear any specific root to show a global tree
+            }}
+            className={`nav-btn ${currentView === "tree" ? "active" : ""}`}
+            style={{ flex: 1, padding: "10px", borderRadius: "12px", border: "1px solid rgba(255,255,255,0.1)", background: currentView === "tree" ? "rgba(100,130,255,0.2)" : "var(--bg-glass)", color: currentView === "tree" ? "#c7d2fe" : "var(--text)", fontWeight: currentView === "tree" ? 700 : 500, cursor: "pointer", transition: "all 0.2s" }}
+          >
+            🌳 ツリー
+          </button>
+          <button
+            onClick={() => setCurrentView("routine")}
+            className={`nav-btn ${currentView === "routine" ? "active" : ""}`}
+            style={{ flex: 1, padding: "10px", borderRadius: "12px", border: "1px solid rgba(255,255,255,0.1)", background: currentView === "routine" ? "rgba(100,130,255,0.2)" : "var(--bg-glass)", color: currentView === "routine" ? "#c7d2fe" : "var(--text)", fontWeight: currentView === "routine" ? 700 : 500, cursor: "pointer", transition: "all 0.2s" }}
+          >
+            🔁 習慣
+          </button>
+        </nav>
       </header>
+      
+      {currentView === "todo" && (
+        <main className="main-content" style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
 
       {/* Notification banner */}
       {notifPermission === "default" && (
@@ -1670,115 +1728,6 @@ export default function Home() {
             )}
           </div>
 
-
-          {/* ── Daily Routines (Glassmorphism) ── */}
-          <div className="routines-card" style={{
-            background: "rgba(255, 255, 255, 0.6)",
-            backdropFilter: "blur(12px)",
-            WebkitBackdropFilter: "blur(12px)",
-            borderRadius: "16px",
-            padding: "20px",
-            boxShadow: "0 4px 20px rgba(0,0,0,0.03)",
-            border: "1px solid rgba(255,255,255,0.8)",
-            marginBottom: "24px",
-            display: "flex",
-            flexDirection: "column",
-            gap: "16px"
-          }}>
-            <h3 style={{ margin: 0, fontSize: "1.1rem", color: "var(--text-color)", display: "flex", alignItems: "center", gap: "8px" }}>
-              <span>🔁 毎日のルーティン</span>
-            </h3>
-            
-            <form onSubmit={handleAddRoutine} style={{ display: "flex", gap: "8px" }}>
-              <input
-                type="text"
-                placeholder="新しいルーティンを入力..."
-                value={newRoutineTitle}
-                onChange={(e) => setNewRoutineTitle(e.target.value)}
-                maxLength={50}
-                style={{
-                  flex: 1,
-                  padding: "10px 14px",
-                  borderRadius: "12px",
-                  border: "1px solid rgba(0,0,0,0.1)",
-                  background: "rgba(255,255,255,0.8)",
-                  fontSize: "0.95rem",
-                  outline: "none",
-                  transition: "border-color 0.2s"
-                }}
-              />
-              <button
-                type="submit"
-                disabled={!newRoutineTitle.trim()}
-                style={{
-                  padding: "0 16px",
-                  borderRadius: "12px",
-                  border: "none",
-                  background: "var(--primary-color)",
-                  color: "#fff",
-                  fontWeight: "bold",
-                  cursor: newRoutineTitle.trim() ? "pointer" : "not-allowed",
-                  opacity: newRoutineTitle.trim() ? 1 : 0.6,
-                  transition: "all 0.2s"
-                }}
-              >
-                追加
-              </button>
-            </form>
-
-            {routines.length > 0 && (
-              <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-                {routines.map(routine => {
-                  const isCompletedToday = routine.completedDates.includes(todayISO());
-                  return (
-                    <div key={routine.id} style={{
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "space-between",
-                      padding: "12px 14px",
-                      background: isCompletedToday ? "rgba(74, 222, 128, 0.1)" : "rgba(255,255,255,0.7)",
-                      borderRadius: "12px",
-                      border: isCompletedToday ? "1px solid rgba(74, 222, 128, 0.3)" : "1px solid rgba(0,0,0,0.05)",
-                      transition: "all 0.3s ease"
-                    }}>
-                      <label style={{ display: "flex", alignItems: "center", gap: "12px", cursor: "pointer", flex: 1 }}>
-                        <input
-                          type="checkbox"
-                          checked={isCompletedToday}
-                          onChange={() => toggleRoutineCompleted(routine.id)}
-                          style={{
-                            width: "20px", height: "20px", cursor: "pointer",
-                            accentColor: "var(--primary-color)"
-                          }}
-                        />
-                        <span style={{
-                          fontSize: "0.95rem",
-                          color: isCompletedToday ? "var(--text-muted)" : "var(--text-color)",
-                          textDecoration: isCompletedToday ? "line-through" : "none",
-                          transition: "all 0.3s"
-                        }}>
-                          {routine.title}
-                        </span>
-                      </label>
-                      <button
-                        onClick={() => deleteRoutine(routine.id)}
-                        title="ルーティンを削除"
-                        style={{
-                          background: "none", border: "none", cursor: "pointer",
-                          color: "var(--text-muted)", fontSize: "1rem", opacity: 0.6,
-                          padding: "4px"
-                        }}
-                      >
-                        🗑️
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-
-
           {/* ── Add Task Form ── */}
           <form onSubmit={handleAddTask} className="todo-form">
             <div className="input-row">
@@ -1946,8 +1895,124 @@ export default function Home() {
           )}
         </div>
       </div>
+      </main>
+      )}
 
-      <footer className="footer-note">
+      {currentView === "routine" && (
+        <main className="main-content" style={{ display: "flex", flexDirection: "column", gap: "24px", animation: "modalFadeIn 0.3s ease" }}>
+          <div className="glass-panel" style={{ padding: "24px", borderRadius: "16px" }}>
+            <h2 style={{ display: "flex", alignItems: "center", gap: "8px", margin: "0 0 16px 0", color: "var(--text)" }}>
+              <span>🔁</span> 習慣トラッカー
+            </h2>
+            
+            <form onSubmit={handleAddRoutine} style={{ display: "flex", gap: "8px", marginBottom: "24px" }}>
+              <input
+                type="text"
+                placeholder="新しいルーティンを入力..."
+                value={newRoutineTitle}
+                onChange={(e) => setNewRoutineTitle(e.target.value)}
+                maxLength={50}
+                style={{
+                  flex: 1, padding: "12px 16px", borderRadius: "12px", border: "1px solid rgba(255,255,255,0.1)",
+                  background: "rgba(0,0,0,0.1)", fontSize: "1rem", color: "var(--text)", outline: "none"
+                }}
+              />
+              <button
+                type="submit" disabled={!newRoutineTitle.trim()}
+                style={{
+                  padding: "0 24px", borderRadius: "12px", border: "none", background: "var(--primary)",
+                  color: "#fff", fontWeight: "bold", cursor: newRoutineTitle.trim() ? "pointer" : "not-allowed",
+                  opacity: newRoutineTitle.trim() ? 1 : 0.6, transition: "all 0.2s"
+                }}
+              >
+                追加
+              </button>
+            </form>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+              {routines.map(routine => {
+                const past7Days = getLast7DaysJST();
+                const isCompletedToday = routine.completedDates.includes(getJSTTodayISO());
+                
+                return (
+                  <div key={routine.id} style={{
+                    display: "flex", flexDirection: "column", gap: "12px", padding: "16px",
+                    background: isCompletedToday ? "rgba(34,197,94,0.05)" : "rgba(255,255,255,0.02)",
+                    borderRadius: "12px", border: isCompletedToday ? "1px solid rgba(34,197,94,0.2)" : "1px solid rgba(255,255,255,0.05)",
+                    transition: "all 0.3s ease"
+                  }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <label style={{ display: "flex", alignItems: "center", gap: "12px", cursor: "pointer", flex: 1 }}>
+                        <input
+                          type="checkbox" checked={isCompletedToday} onChange={() => toggleRoutineCompleted(routine.id)}
+                          style={{ width: "24px", height: "24px", cursor: "pointer", accentColor: "var(--primary)" }}
+                        />
+                        <span style={{ fontSize: "1.1rem", fontWeight: 500, color: isCompletedToday ? "var(--text-muted)" : "var(--text)", textDecoration: isCompletedToday ? "line-through" : "none", transition: "all 0.3s" }}>
+                          {routine.title}
+                        </span>
+                      </label>
+                      <button onClick={() => deleteRoutine(routine.id)} style={{ background: "none", border: "none", color: "var(--danger)", cursor: "pointer", padding: "8px", opacity: 0.6 }}>🗑️</button>
+                    </div>
+                    
+                    {/* Habit Tracker 7-day Dots */}
+                    <div style={{ display: "flex", justifyContent: "flex-end", gap: "12px", marginTop: "4px" }}>
+                      {past7Days.map(dayInfo => {
+                        const isDone = routine.completedDates.includes(dayInfo.date);
+                        return (
+                          <div key={dayInfo.date} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "6px" }}>
+                            <span style={{ fontSize: "0.75rem", color: dayInfo.isToday ? "var(--primary)" : "var(--text-muted)", fontWeight: dayInfo.isToday ? 700 : 400 }}>
+                              {dayInfo.isToday ? "今日" : dayInfo.label}
+                            </span>
+                            <div style={{
+                              width: dayInfo.isToday ? "20px" : "16px",
+                              height: dayInfo.isToday ? "20px" : "16px",
+                              borderRadius: "50%",
+                              background: isDone ? "var(--primary)" : "transparent",
+                              border: isDone ? "none" : "2px solid rgba(255,255,255,0.15)",
+                              transition: "all 0.3s ease",
+                              boxShadow: isDone && dayInfo.isToday ? "0 0 10px var(--primary)" : "none"
+                            }} />
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
+              {routines.length === 0 && (
+                <div style={{ textAlign: "center", padding: "40px", color: "var(--text-muted)" }}>
+                  <span style={{ fontSize: "2rem" }}>🌱</span>
+                  <p>まだ習慣が登録されていません。<br/>毎日のルーティンを追加してみましょう。</p>
+                </div>
+              )}
+            </div>
+          </div>
+        </main>
+      )}
+
+      {currentView === "tree" && (
+        <main className="main-content" style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: "70vh", position: "relative", borderRadius: "16px", overflow: "hidden", animation: "modalFadeIn 0.3s ease" }}>
+          {tasks.length > 0 ? (
+            <MindMapView
+              tasks={tasks}
+              rootTaskId={tasks.find(t => !t.parentId)?.id || tasks[0].id}
+              onClose={() => setCurrentView("todo")}
+              onToggleComplete={(id) => handleToggleComplete(id)}
+              onOpenEdit={(task) => handleOpenEdit(task, { stopPropagation: () => {} } as React.MouseEvent)}
+              onAddSubtask={(parentId) => {
+                const tempTask = {
+                  id: Date.now().toString(), text: "新しい子タスク", completed: false, category: tasks.find(t => t.id === parentId)?.category || categories[0], priority: "medium", parentId: parentId, createdAt: Date.now()
+                };
+                setEditingTask(tempTask as Task); setEditText(tempTask.text); setEditDescription(""); setEditCategory(tempTask.category); setEditPriority(tempTask.priority as Task["priority"]); setEditParentId(tempTask.parentId || ""); setEditStartDate(""); setEditDueDate(""); setEditDueTime("");
+              }}
+            />
+          ) : (
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "var(--text-muted)" }}>
+              タスクがありません
+            </div>
+          )}
+        </main>
+      )}      <footer className="footer-note">
         <p>© 2026 FocusTodo. Securely Connected.</p>
       </footer>
     </div>  {/* end app-container */}
