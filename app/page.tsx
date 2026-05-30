@@ -231,7 +231,7 @@ export default function Home() {
     if (timeSinceWrite < 30000) return;
 
     try {
-      const res = await fetch("/api/tasks");
+      const res = await fetch(`/api/tasks?_t=${Date.now()}`, { cache: "no-store" });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const ct = res.headers.get("content-type");
       if (!ct?.includes("application/json")) throw new Error("Non-JSON");

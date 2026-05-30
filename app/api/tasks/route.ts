@@ -6,6 +6,8 @@ import { logger } from "../../lib/logger";
 import fs from "fs/promises";
 import path from "path";
 
+export const dynamic = "force-dynamic";
+
 // ── ゲスト用フォールバック（ローカル開発 / KV 未設定時）─────────────────────
 const DATA_DIR = path.join(process.cwd(), "data");
 const GUEST_FILE = path.join(DATA_DIR, "tasks.json");
