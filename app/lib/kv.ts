@@ -46,6 +46,7 @@ export interface Task {
 export interface Routine {
   id: string;
   title: string;
+  description?: string;
   category: string;
   completedDates: string[];
 }

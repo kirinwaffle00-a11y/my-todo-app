@@ -32,6 +32,7 @@ export interface Task {
 export interface Routine {
   id: string;
   title: string;
+  description?: string;
   category: string;
   completedDates: string[];
 }
@@ -122,8 +123,10 @@ export default function Home() {
   // ── Form States ──
   const [inputText, setInputText] = useState("");
   const [newRoutineTitle, setNewRoutineTitle] = useState("");
+  const [newRoutineDescription, setNewRoutineDescription] = useState("");
   const [editingRoutineId, setEditingRoutineId] = useState<string | null>(null);
   const [editingRoutineTitle, setEditingRoutineTitle] = useState("");
+  const [editingRoutineDescription, setEditingRoutineDescription] = useState("");
   const [description, setDescription] = useState("");
   const [category, setCategory] = useState("勉強用");
   const [priority, setPriority] = useState<Task["priority"]>("medium");
@@ -735,9 +738,10 @@ export default function Home() {
 
   const saveRoutineEdit = (routineId: string) => {
     if (!editingRoutineTitle.trim()) return;
-    updateRoutines(routines.map(r => r.id === routineId ? { ...r, title: editingRoutineTitle.trim() } : r));
+    updateRoutines(routines.map(r => r.id === routineId ? { ...r, title: editingRoutineTitle.trim(), description: editingRoutineDescription.trim() || undefined } : r));
     setEditingRoutineId(null);
     setEditingRoutineTitle("");
+    setEditingRoutineDescription("");
   };
   const handleAddTask = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1914,28 +1918,41 @@ export default function Home() {
               <span>🔁</span> 習慣トラッカー
             </h2>
             
-            <form onSubmit={handleAddRoutine} style={{ display: "flex", gap: "8px", marginBottom: "24px" }}>
+            <form onSubmit={handleAddRoutine} style={{ display: "flex", flexDirection: "column", gap: "8px", marginBottom: "24px" }}>
+              <div style={{ display: "flex", gap: "8px" }}>
+                <input
+                  type="text"
+                  placeholder="新しいルーティンを入力..."
+                  value={newRoutineTitle}
+                  onChange={(e) => setNewRoutineTitle(e.target.value)}
+                  maxLength={50}
+                  style={{
+                    flex: 1, padding: "12px 16px", borderRadius: "12px", border: "1px solid rgba(255,255,255,0.1)",
+                    background: "rgba(0,0,0,0.1)", fontSize: "1rem", color: "var(--text)", outline: "none"
+                  }}
+                />
+                <button
+                  type="submit" disabled={!newRoutineTitle.trim()}
+                  style={{
+                    padding: "0 24px", borderRadius: "12px", border: "none", background: "var(--primary)",
+                    color: "#fff", fontWeight: "bold", cursor: newRoutineTitle.trim() ? "pointer" : "not-allowed",
+                    opacity: newRoutineTitle.trim() ? 1 : 0.6, transition: "all 0.2s"
+                  }}
+                >
+                  追加
+                </button>
+              </div>
               <input
                 type="text"
-                placeholder="新しいルーティンを入力..."
-                value={newRoutineTitle}
-                onChange={(e) => setNewRoutineTitle(e.target.value)}
-                maxLength={50}
+                placeholder="詳細（任意）"
+                value={newRoutineDescription}
+                onChange={(e) => setNewRoutineDescription(e.target.value)}
+                maxLength={200}
                 style={{
-                  flex: 1, padding: "12px 16px", borderRadius: "12px", border: "1px solid rgba(255,255,255,0.1)",
-                  background: "rgba(0,0,0,0.1)", fontSize: "1rem", color: "var(--text)", outline: "none"
+                  padding: "10px 16px", borderRadius: "12px", border: "1px solid rgba(255,255,255,0.1)",
+                  background: "rgba(0,0,0,0.05)", fontSize: "0.9rem", color: "var(--text-muted)", outline: "none"
                 }}
               />
-              <button
-                type="submit" disabled={!newRoutineTitle.trim()}
-                style={{
-                  padding: "0 24px", borderRadius: "12px", border: "none", background: "var(--primary)",
-                  color: "#fff", fontWeight: "bold", cursor: newRoutineTitle.trim() ? "pointer" : "not-allowed",
-                  opacity: newRoutineTitle.trim() ? 1 : 0.6, transition: "all 0.2s"
-                }}
-              >
-                追加
-              </button>
             </form>
 
             <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
@@ -1952,31 +1969,48 @@ export default function Home() {
                   }}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                       {editingRoutineId === routine.id ? (
-                        <div style={{ display: "flex", alignItems: "center", gap: "8px", flex: 1 }}>
+                        <div style={{ display: "flex", flexDirection: "column", gap: "8px", flex: 1 }}>
                           <input
                             type="text"
                             value={editingRoutineTitle}
                             onChange={(e) => setEditingRoutineTitle(e.target.value)}
                             onKeyDown={(e) => { if (e.key === "Enter") saveRoutineEdit(routine.id); else if (e.key === "Escape") setEditingRoutineId(null); }}
                             autoFocus
-                            style={{ flex: 1, padding: "8px 12px", borderRadius: "8px", border: "1px solid rgba(255,255,255,0.2)", background: "rgba(0,0,0,0.2)", color: "var(--text)", outline: "none", fontSize: "1rem" }}
+                            style={{ padding: "8px 12px", borderRadius: "8px", border: "1px solid rgba(255,255,255,0.2)", background: "rgba(0,0,0,0.2)", color: "var(--text)", outline: "none", fontSize: "1rem" }}
                           />
-                          <button onClick={() => saveRoutineEdit(routine.id)} style={{ background: "var(--primary)", color: "#fff", border: "none", padding: "8px 16px", borderRadius: "8px", cursor: "pointer", fontWeight: "bold" }}>保存</button>
-                          <button onClick={() => setEditingRoutineId(null)} style={{ background: "rgba(255,255,255,0.1)", color: "var(--text)", border: "none", padding: "8px 16px", borderRadius: "8px", cursor: "pointer" }}>キャンセル</button>
+                          <input
+                            type="text"
+                            placeholder="詳細（任意）"
+                            value={editingRoutineDescription}
+                            onChange={(e) => setEditingRoutineDescription(e.target.value)}
+                            onKeyDown={(e) => { if (e.key === "Enter") saveRoutineEdit(routine.id); else if (e.key === "Escape") setEditingRoutineId(null); }}
+                            style={{ padding: "8px 12px", borderRadius: "8px", border: "1px solid rgba(255,255,255,0.1)", background: "rgba(0,0,0,0.1)", color: "var(--text)", outline: "none", fontSize: "0.9rem" }}
+                          />
+                          <div style={{ display: "flex", gap: "8px", justifyContent: "flex-end" }}>
+                            <button onClick={() => saveRoutineEdit(routine.id)} style={{ background: "var(--primary)", color: "#fff", border: "none", padding: "8px 16px", borderRadius: "8px", cursor: "pointer", fontWeight: "bold" }}>保存</button>
+                            <button onClick={() => setEditingRoutineId(null)} style={{ background: "rgba(255,255,255,0.1)", color: "var(--text)", border: "none", padding: "8px 16px", borderRadius: "8px", cursor: "pointer" }}>キャンセル</button>
+                          </div>
                         </div>
                       ) : (
                         <>
-                          <label style={{ display: "flex", alignItems: "center", gap: "12px", cursor: "pointer", flex: 1 }}>
+                          <label style={{ display: "flex", alignItems: "flex-start", gap: "12px", cursor: "pointer", flex: 1 }}>
                             <input
                               type="checkbox" checked={isCompletedToday} onChange={() => toggleRoutineCompleted(routine.id)}
-                              style={{ width: "24px", height: "24px", cursor: "pointer", accentColor: "var(--primary)" }}
+                              style={{ width: "24px", height: "24px", cursor: "pointer", accentColor: "var(--primary)", marginTop: "4px" }}
                             />
-                            <span style={{ fontSize: "1.1rem", fontWeight: 500, color: isCompletedToday ? "var(--text-muted)" : "var(--text)", textDecoration: isCompletedToday ? "line-through" : "none", transition: "all 0.3s" }}>
-                              {routine.title}
+                            <span style={{ display: "flex", flexDirection: "column", gap: "2px", flex: 1 }}>
+                              <span style={{ fontSize: "1.1rem", fontWeight: 500, color: isCompletedToday ? "var(--text-muted)" : "var(--text)", textDecoration: isCompletedToday ? "line-through" : "none", transition: "all 0.3s" }}>
+                                {routine.title}
+                              </span>
+                              {routine.description && (
+                                <span style={{ fontSize: "0.85rem", color: isCompletedToday ? "var(--text-muted)" : "var(--text-muted)" }}>
+                                  {routine.description}
+                                </span>
+                              )}
                             </span>
                           </label>
-                          <div style={{ display: "flex", gap: "4px" }}>
-                            <button onClick={() => { setEditingRoutineId(routine.id); setEditingRoutineTitle(routine.title); }} style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", padding: "8px", opacity: 0.6 }} title="編集">✏️</button>
+                          <div style={{ display: "flex", gap: "4px", alignSelf: "flex-start" }}>
+                            <button onClick={() => { setEditingRoutineId(routine.id); setEditingRoutineTitle(routine.title); setEditingRoutineDescription(routine.description || ""); }} style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", padding: "8px", opacity: 0.6 }} title="編集">✏️</button>
                             <button onClick={() => deleteRoutine(routine.id)} style={{ background: "none", border: "none", color: "var(--danger)", cursor: "pointer", padding: "8px", opacity: 0.6 }} title="削除">🗑️</button>
                           </div>
                         </>
