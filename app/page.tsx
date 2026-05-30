@@ -694,26 +694,30 @@ export default function Home() {
       status: editingTask.penalty?.status || "active" as const
     } : undefined;
 
-    const updated = tasks.map((t) =>
-      t.id === editingTask.id
-        ? {
-            ...t,
-            text: trimmed,
-            parentId: editParentId || undefined,
-            description: editDescription.trim() || undefined,
-            category: editCategory,
-            priority: editPriority,
-            startDate: editStartDate || undefined,
-            dueDate: editDueDate || undefined,
-            dueTime: editDueTime || undefined,
-            isRoutine: editIsRoutine,
-            estimatedMinutes: editEstimatedMinutes !== "" ? Number(editEstimatedMinutes) : undefined,
-            notToDos: newNotToDos,
-            penalty: newPenalty,
-            notified: false,
-          }
-        : t
-    );
+    const isNew = !tasks.some(t => t.id === editingTask.id);
+    const newTaskObj = {
+      ...editingTask,
+      text: trimmed,
+      parentId: editParentId || undefined,
+      description: editDescription.trim() || undefined,
+      category: editCategory,
+      priority: editPriority,
+      startDate: editStartDate || undefined,
+      dueDate: editDueDate || undefined,
+      dueTime: editDueTime || undefined,
+      isRoutine: editIsRoutine,
+      estimatedMinutes: editEstimatedMinutes !== "" ? Number(editEstimatedMinutes) : undefined,
+      notToDos: newNotToDos,
+      penalty: newPenalty,
+      notified: false,
+    };
+    
+    let updated;
+    if (isNew) {
+      updated = [newTaskObj, ...tasks];
+    } else {
+      updated = tasks.map(t => t.id === editingTask.id ? newTaskObj : t);
+    }
     updateState(updated, categories);
     setEditingTask(null);
   };
@@ -1632,12 +1636,28 @@ export default function Home() {
         <div className="modal-overlay" onClick={() => setEditingTask(null)}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
-              <h2>✏️ タスクを編集</h2>
+              <h2>{editingTask && !tasks.some(t => t.id === editingTask.id) ? "➕ 子タスクを追加" : "✏️ タスクを編集"}</h2>
               <button type="button" className="close-x-btn" onClick={() => setEditingTask(null)}>✕</button>
             </div>
 
-            <div className="modal-body" style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+            <div className="modal-body" style={{ display: "flex", flexDirection: "column", gap: "16px", maxHeight: "60vh", overflowY: "auto", paddingRight: "4px" }}>
               {/* Task name */}
+              {/* Parent Task Selector */}
+              <div className="settings-form-group">
+                <label>親タスク</label>
+                <select 
+                  className="todo-input" 
+                  style={{ fontSize: "0.95rem", height: "44px", padding: "0 12px", background: "var(--bg)", color: "var(--text)", border: "1px solid var(--border)", borderRadius: "8px" }}
+                  value={editParentId} 
+                  onChange={(e) => setEditParentId(e.target.value)}
+                >
+                  <option value="">(なし - ルートタスク)</option>
+                  {tasks.filter(t => t.id !== editingTask?.id && !t.completed).map(t => (
+                    <option key={t.id} value={t.id}>{t.text}</option>
+                  ))}
+                </select>
+              </div>
+
               <div className="settings-form-group">
                 <label htmlFor="edit-task-title">タスク名</label>
                 <input
@@ -1814,7 +1834,7 @@ export default function Home() {
                 onClick={handleSaveEdit}
                 disabled={!editText.trim()}
               >
-                変更を保存
+                {editingTask && !tasks.some(t => t.id === editingTask.id) ? "タスクを追加" : "変更を保存"}
               </button>
               <button
                 type="button"
