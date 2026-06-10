@@ -824,35 +824,40 @@ export default function Home() {
 
   const handleToggleComplete = async (id: string) => {
     const task = tasks.find((t) => t.id === id);
-    const willComplete = task && !task.completed;
+    if (!task) return;
+    const willComplete = !task.completed;
 
     const getDescendants = (parentId: string): string[] => {
       const children = tasks.filter(t => t.parentId === parentId).map(t => t.id);
       return [...children, ...children.flatMap(getDescendants)];
     };
-    const descendantIds = getDescendants(id);
+    
+    let updated = [...tasks];
 
-    let updated = tasks.map((t) => {
-      if (t.id === id || descendantIds.includes(t.id)) {
-        return { ...t, completed: Boolean(willComplete) };
-      }
-      return t;
-    });
-
-    if (!willComplete && task?.parentId) {
-      // Cascade FALSE to all ancestors
-      let currentParentId: string | undefined = task.parentId;
-      while (currentParentId) {
-        const pId: string = currentParentId;
-        const parent = updated.find(t => t.id === pId);
-        if (!parent) break;
-
-        if (parent.completed) {
-          updated = updated.map(t => t.id === pId ? { ...t, completed: false } : t);
+    if (willComplete) {
+      // Toggle to true: Complete this task and all its descendants
+      const descendantIds = getDescendants(id);
+      const toComplete = new Set([id, ...descendantIds]);
+      updated = updated.map(t => toComplete.has(t.id) ? { ...t, completed: true } : t);
+    } else {
+      // Toggle to false: Un-complete this task, all its descendants, and all its ancestors
+      const descendantIds = getDescendants(id);
+      const toUncomplete = new Set([id, ...descendantIds]);
+      
+      let currentId: string | undefined = id;
+      while (currentId) {
+        const currTask = updated.find(t => t.id === currentId);
+        if (currTask?.parentId) {
+          toUncomplete.add(currTask.parentId);
+          currentId = currTask.parentId;
+        } else {
+          currentId = undefined;
         }
-        currentParentId = parent.parentId;
       }
+
+      updated = updated.map(t => toUncomplete.has(t.id) ? { ...t, completed: false } : t);
     }
+
     updateState(updated, categories);
 
     // ── Auto-delete Google Calendar event on completion ──
@@ -1193,9 +1198,11 @@ export default function Home() {
   );
 
   // ── Priority groups split ──
-  const highPriorityTasks = filteredTasks.filter((task) => (task.priority ?? "medium") === "high");
-  const mediumPriorityTasks = filteredTasks.filter((task) => (task.priority ?? "medium") === "medium");
-  const lowPriorityTasks = filteredTasks.filter((task) => (task.priority ?? "medium") === "low");
+  // Compute top-level tasks to show in priority groups, hiding children (children render inside parents)
+  const topLevelFilteredTasks = filteredTasks.filter((task) => !task.parentId);
+  const highPriorityTasks = topLevelFilteredTasks.filter((task) => (task.priority ?? "medium") === "high");
+  const mediumPriorityTasks = topLevelFilteredTasks.filter((task) => (task.priority ?? "medium") === "medium");
+  const lowPriorityTasks = topLevelFilteredTasks.filter((task) => (task.priority ?? "medium") === "low");
 
 
   const renderTaskNode = (task: Task, depth: number = 0): React.ReactNode => {
@@ -1483,7 +1490,7 @@ export default function Home() {
         {!isCollapsed && (
           <ul className="todo-list">
             {sectionTasks.length > 0 ? (
-              sectionTasks.filter(t => !t.parentId).map(task => renderTaskNode(task))
+              sectionTasks.map(task => renderTaskNode(task))
             ) : (
               <div className="priority-empty-state">
                 <p>この優先度のタスクはありません。</p>
@@ -1617,7 +1624,7 @@ export default function Home() {
       </header>
       
       {currentView === "todo" && (
-        <main className="main-content" style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
+        <main className="main-content" style={{ display: "flex", flexDirection: "column", gap: "24px", flex: 1, minHeight: 0 }}>
 
       {/* Notification banner */}
       {notifPermission === "default" && (
@@ -1971,7 +1978,7 @@ export default function Home() {
       )}
 
       {currentView === "routine" && (
-        <main className="main-content" style={{ display: "flex", flexDirection: "column", gap: "24px", animation: "modalFadeIn 0.3s ease" }}>
+        <main className="main-content" style={{ display: "flex", flexDirection: "column", gap: "24px", animation: "modalFadeIn 0.3s ease", flex: 1, minHeight: 0, overflowY: "auto" }}>
           <div className="glass-panel" style={{ padding: "24px", borderRadius: "16px" }}>
             <h2 style={{ display: "flex", alignItems: "center", gap: "8px", margin: "0 0 16px 0", color: "var(--text)" }}>
               <span>🔁</span> 習慣トラッカー
