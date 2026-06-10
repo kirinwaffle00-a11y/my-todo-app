@@ -491,6 +491,17 @@ body::after {
   outline: none;
   transition: all 0.2s;
   width: 100%;
+  color-scheme: dark;
+}
+
+.date-input::-webkit-calendar-picker-indicator {
+  opacity: 0.5;
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+
+.date-input::-webkit-calendar-picker-indicator:hover {
+  opacity: 1;
 }
 
 .date-input:focus {
