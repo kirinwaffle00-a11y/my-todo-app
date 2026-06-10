@@ -15,14 +15,18 @@ const GUEST_FILE = path.join(DATA_DIR, "tasks.json");
 // [H-3] データ量の上限定数
 const MAX_TASKS = 500;
 const MAX_CATEGORIES = 50;
+const MAX_FOLDERS = 30;
 const MAX_TEXT_LEN = 200;
 const MAX_DESCRIPTION_LEN = 1000;
 const MAX_CATEGORY_LEN = 50;
+const MAX_FOLDER_NAME_LEN = 50;
+const MAX_FOLDER_ID_LEN = 100;
 
 const DEFAULT_STATE: UserState = {
   tasks: [],
   routines: [],
   categories: ["勉強用", "その他"],
+  folders: [],
   discordWebhookUrl: "",
   discordNotifyTime: "08:00",
   disciplineScore: 0,
@@ -38,6 +42,8 @@ function sanitizeTask(t: Record<string, unknown>): Record<string, unknown> | nul
     text: typeof t.text === "string" ? t.text.slice(0, MAX_TEXT_LEN) : "",
     description: typeof t.description === "string" ? t.description.slice(0, MAX_DESCRIPTION_LEN) : undefined,
     category: typeof t.category === "string" ? t.category.slice(0, MAX_CATEGORY_LEN) : "その他",
+    // [H-3] Sanitize folderId: truncate and only allow safe characters (alphanumeric + 日本語 + slash + space)
+    folderId: typeof t.folderId === "string" ? t.folderId.slice(0, MAX_FOLDER_ID_LEN) : undefined,
   };
 }
 
@@ -65,6 +71,7 @@ async function loadGuestState(): Promise<UserState> {
       tasks: Array.isArray(parsed.tasks) ? parsed.tasks : [],
       routines: Array.isArray(parsed.routines) ? parsed.routines : [],
       categories: Array.isArray(parsed.categories) ? parsed.categories : DEFAULT_STATE.categories,
+      folders: Array.isArray(parsed.folders) ? parsed.folders : [],
       discordWebhookUrl: parsed.discordWebhookUrl ?? "",
       discordNotifyTime: parsed.discordNotifyTime ?? "08:00",
       disciplineScore: parsed.disciplineScore ?? 0,
@@ -141,6 +148,12 @@ export async function POST(request: Request) {
       categories: rawCats
         .filter((c: unknown) => typeof c === "string")
         .map((c: string) => c.slice(0, MAX_CATEGORY_LEN)),
+      // [H-3] Sanitize and limit folders array
+      folders: (Array.isArray(body.folders) ? body.folders : [])
+        .filter((f: unknown) => typeof f === "string" && f.trim().length > 0)
+        .map((f: string) => f.trim().slice(0, MAX_FOLDER_NAME_LEN))
+        .slice(0, MAX_FOLDERS),
+      foldersUpdatedAt: typeof body.foldersUpdatedAt === "number" ? body.foldersUpdatedAt : Date.now(),
       discordWebhookUrl: typeof body.discordWebhookUrl === "string" ? body.discordWebhookUrl : "",
       discordNotifyTime: typeof body.discordNotifyTime === "string" ? body.discordNotifyTime : "08:00",
       disciplineScore: typeof body.disciplineScore === "number"

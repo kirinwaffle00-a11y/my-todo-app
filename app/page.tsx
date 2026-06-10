@@ -27,6 +27,7 @@ export interface Task {
   parentTaskId?: string;
   notToDos?: { id: string; text: string; kept?: boolean }[];
   penalty?: { type: "screen_time_lock" | "other"; targetApp?: string; status: "active" | "executed" | "cleared" };
+  folderId?: string; // Folder path (e.g. "大学" or "大学/課題")
 }
 
 export interface Routine {
@@ -104,6 +105,20 @@ export default function Home() {
 
   // ── Priority Accordion ──
   const [collapsedPriorities, setCollapsedPriorities] = useState<Set<string>>(new Set());
+
+  // ── Folder State ──
+  const [folders, setFolders] = useState<string[]>([]);
+  const [foldersUpdatedAt, setFoldersUpdatedAt] = useState<number>(0);
+  const [selectedFolder, setSelectedFolder] = useState<string>(""); // for add form ("" = 受信トレイ)
+  const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(new Set());
+  const [showNewFolderInput, setShowNewFolderInput] = useState(false);
+  const [newFolderText, setNewFolderText] = useState("");
+  const [folderFilter, setFolderFilter] = useState<string>("all"); // "all" or specific folderId
+  const foldersRef = React.useRef(folders);
+  const foldersUpdatedAtRef = React.useRef(foldersUpdatedAt);
+  useEffect(() => { foldersRef.current = folders; }, [folders]);
+  useEffect(() => { foldersUpdatedAtRef.current = foldersUpdatedAt; }, [foldersUpdatedAt]);
+
 
   // ── Task Edit Modal States ──
   const [editingTask, setEditingTask] = useState<Task | null>(null);
@@ -188,6 +203,7 @@ export default function Home() {
   const LS_TASKS = "focustodo_tasks";
   const LS_ROUTINES = "focustodo_routines";
   const LS_CATS  = "focustodo_categories";
+  const LS_FOLDERS = "focustodo_folders";
   const LS_LAST_WRITE = "focustodo_last_write";
   const LS_DISCORD_WEBHOOK = "focustodo_discord_webhook";
   const LS_DISCORD_TIME = "focustodo_discord_time";
@@ -196,17 +212,19 @@ export default function Home() {
   const LS_VELOCITY = "focustodo_velocity";
   const LS_TASKS_UPDATED = "focustodo_tasks_updated_at";
   const LS_ROUTINES_UPDATED = "focustodo_routines_updated_at";
+  const LS_FOLDERS_UPDATED = "focustodo_folders_updated_at";
 
   const loadFromLocalStorage = (): { 
-    tasks: Task[]; routines: Routine[]; categories: string[]; lastWrite: number; 
+    tasks: Task[]; routines: Routine[]; categories: string[]; folders: string[]; lastWrite: number; 
     discordWebhookUrl: string; discordNotifyTime: string;
     disciplineScore: number; averageBedtime: string; taskVelocityPerHour: number;
-    tasksUpdatedAt: number; routinesUpdatedAt: number;
+    tasksUpdatedAt: number; routinesUpdatedAt: number; foldersUpdatedAt: number;
   } => {
     try {
       const t = localStorage.getItem(LS_TASKS);
       const r = localStorage.getItem(LS_ROUTINES);
       const c = localStorage.getItem(LS_CATS);
+      const f = localStorage.getItem(LS_FOLDERS);
       const w = localStorage.getItem(LS_LAST_WRITE);
       const dw = localStorage.getItem(LS_DISCORD_WEBHOOK) || "";
       const dt = localStorage.getItem(LS_DISCORD_TIME) || "08:00";
@@ -216,6 +234,7 @@ export default function Home() {
       
       const tu = localStorage.getItem(LS_TASKS_UPDATED);
       const ru = localStorage.getItem(LS_ROUTINES_UPDATED);
+      const fu = localStorage.getItem(LS_FOLDERS_UPDATED);
       
       const rawTasks: Task[] = t ? JSON.parse(t) : [];
       const migratedTasks = rawTasks.map((task: Partial<Task>) => {
@@ -230,6 +249,7 @@ export default function Home() {
         tasks: migratedTasks,
         routines: r ? JSON.parse(r) : [],
         categories: c ? JSON.parse(c) : ["勉強用", "その他"],
+        folders: f ? JSON.parse(f) : [],
         lastWrite: w ? Number(w) : 0,
         discordWebhookUrl: dw,
         discordNotifyTime: dt,
@@ -238,13 +258,14 @@ export default function Home() {
         taskVelocityPerHour: vel ? Number(vel) : 60,
         tasksUpdatedAt: tu ? Number(tu) : 0,
         routinesUpdatedAt: ru ? Number(ru) : 0,
+        foldersUpdatedAt: fu ? Number(fu) : 0,
       };
     } catch {
       return { 
-        tasks: [], routines: [], categories: ["勉強用", "その他"], lastWrite: 0, 
+        tasks: [], routines: [], categories: ["勉強用", "その他"], folders: [], lastWrite: 0, 
         discordWebhookUrl: "", discordNotifyTime: "08:00",
         disciplineScore: 0, averageBedtime: "23:30", taskVelocityPerHour: 60,
-        tasksUpdatedAt: 0, routinesUpdatedAt: 0
+        tasksUpdatedAt: 0, routinesUpdatedAt: 0, foldersUpdatedAt: 0
       };
     }
   };
@@ -252,7 +273,8 @@ export default function Home() {
   const saveToLocalStorage = (
     t: Task[], r: Routine[], c: string[], dw?: string, dt?: string, 
     disciplineScore?: number, averageBedtime?: string, taskVelocityPerHour?: number,
-    tasksUpdatedAt?: number, routinesUpdatedAt?: number
+    tasksUpdatedAt?: number, routinesUpdatedAt?: number,
+    fldrs?: string[], foldersUpdatedAt?: number
   ) => {
     try {
       const now = Date.now();
@@ -267,6 +289,8 @@ export default function Home() {
       if (taskVelocityPerHour !== undefined) localStorage.setItem(LS_VELOCITY, String(taskVelocityPerHour));
       if (tasksUpdatedAt !== undefined) localStorage.setItem(LS_TASKS_UPDATED, String(tasksUpdatedAt));
       if (routinesUpdatedAt !== undefined) localStorage.setItem(LS_ROUTINES_UPDATED, String(routinesUpdatedAt));
+      if (fldrs !== undefined) localStorage.setItem(LS_FOLDERS, JSON.stringify(fldrs));
+      if (foldersUpdatedAt !== undefined) localStorage.setItem(LS_FOLDERS_UPDATED, String(foldersUpdatedAt));
     } catch { /* localStorage unavailable */ }
   };
 
@@ -303,15 +327,21 @@ export default function Home() {
       const serverTasksUpdatedAt = data.tasksUpdatedAt || 0;
       const serverRoutinesUpdatedAt = data.routinesUpdatedAt || 0;
 
+      const serverFolders: string[] = Array.isArray(data.folders) ? data.folders : [];
+      const serverFoldersUpdatedAt = data.foldersUpdatedAt || 0;
+
       const local = loadFromLocalStorage();
       const localTasksUpdatedAt = local.tasksUpdatedAt || 0;
       const localRoutinesUpdatedAt = local.routinesUpdatedAt || 0;
+      const localFoldersUpdatedAt = local.foldersUpdatedAt || 0;
       
       const serverHasData = data.initialized === true;
       
       let finalTasks: Task[];
       let finalRoutines: Routine[];
       let finalCats: string[];
+      let finalFolders: string[];
+      let finalFoldersUpdatedAt: number;
       let finalWebhook: string;
       let finalTime: string;
       let finalDiscipline: number;
@@ -325,6 +355,9 @@ export default function Home() {
         finalTasks = local.tasks;
         finalRoutines = local.routines;
         finalCats = local.categories;
+        // [Condition-1] Union merge: local folders take precedence if server has no data
+        finalFolders = local.folders;
+        finalFoldersUpdatedAt = localFoldersUpdatedAt || Date.now();
         finalWebhook = local.discordWebhookUrl;
         finalTime = local.discordNotifyTime;
         finalDiscipline = local.disciplineScore;
@@ -349,6 +382,12 @@ export default function Home() {
           finalRoutines = serverRoutines;
           finalRoutinesUpdatedAt = serverRoutinesUpdatedAt;
         }
+
+        // [Condition-1] Folders: always perform Set-based union merge (never lose folders from either side)
+        // The union ensures no folder is lost even if one device deleted/hadn't synced yet.
+        const mergedFolderSet = new Set([...local.folders, ...serverFolders]);
+        finalFolders = Array.from(mergedFolderSet);
+        finalFoldersUpdatedAt = Math.max(localFoldersUpdatedAt, serverFoldersUpdatedAt) || Date.now();
 
         // For other shared settings, assume server is truth for now (or local if offline edit, simplify by tying to tasks update)
         if (localTasksUpdatedAt > serverTasksUpdatedAt) {
@@ -380,12 +419,14 @@ export default function Home() {
       setTasks(finalTasks);
       setRoutines(finalRoutines);
       setCategories(finalCats);
+      setFolders(finalFolders);
+      setFoldersUpdatedAt(finalFoldersUpdatedAt);
       setDiscordWebhookUrl(finalWebhook);
       setDiscordNotifyTime(finalTime);
       setDisciplineScore(finalDiscipline);
       setAverageBedtime(finalBedtime);
       setTaskVelocityPerHour(finalVelocity);
-      saveToLocalStorage(finalTasks, finalRoutines, finalCats, finalWebhook, finalTime, finalDiscipline, finalBedtime, finalVelocity, finalTasksUpdatedAt, finalRoutinesUpdatedAt);
+      saveToLocalStorage(finalTasks, finalRoutines, finalCats, finalWebhook, finalTime, finalDiscipline, finalBedtime, finalVelocity, finalTasksUpdatedAt, finalRoutinesUpdatedAt, finalFolders, finalFoldersUpdatedAt);
       lastLocalWrite.current = Date.now();
       if (!finalCats.includes(categoryRef.current) && finalCats.length > 0) {
         setCategory(finalCats[0]);
@@ -400,6 +441,8 @@ export default function Home() {
              tasks: finalTasks,
              routines: finalRoutines,
              categories: finalCats,
+             folders: finalFolders,
+             foldersUpdatedAt: finalFoldersUpdatedAt,
              discordWebhookUrl: finalWebhook,
              discordNotifyTime: finalTime,
              disciplineScore: finalDiscipline,
@@ -639,7 +682,8 @@ export default function Home() {
     updatedTasks: Task[] | undefined, 
     updatedRoutines: Routine[] | undefined,
     updatedCategories: string[], 
-    dw?: string, dt?: string, disc?: number, bed?: string, vel?: number
+    dw?: string, dt?: string, disc?: number, bed?: string, vel?: number,
+    updatedFolders?: string[]
   ) {
     if (!isFetchedRef.current) {
       console.warn("[sync] saveStateToServer blocked: isFetched=false (initial load not complete)");
@@ -649,6 +693,7 @@ export default function Home() {
     
     const finalTasks = updatedTasks !== undefined ? updatedTasks : tasksRef.current;
     const finalRoutines = updatedRoutines !== undefined ? updatedRoutines : routinesRef.current;
+    const finalFolders = updatedFolders !== undefined ? updatedFolders : foldersRef.current;
 
     const webhook = dw !== undefined ? dw : discordWebhookUrl;
     const notifyTime = dt !== undefined ? dt : discordNotifyTime;
@@ -659,8 +704,9 @@ export default function Home() {
     const local = loadFromLocalStorage();
     const currentTasksUpdatedAt = updatedTasks !== undefined ? Date.now() : local.tasksUpdatedAt;
     const currentRoutinesUpdatedAt = updatedRoutines !== undefined ? Date.now() : local.routinesUpdatedAt;
+    const currentFoldersUpdatedAt = updatedFolders !== undefined ? Date.now() : (local.foldersUpdatedAt || foldersUpdatedAtRef.current);
     
-    saveToLocalStorage(finalTasks, finalRoutines, updatedCategories, webhook, notifyTime, finalDisc, finalBed, finalVel, currentTasksUpdatedAt, currentRoutinesUpdatedAt);
+    saveToLocalStorage(finalTasks, finalRoutines, updatedCategories, webhook, notifyTime, finalDisc, finalBed, finalVel, currentTasksUpdatedAt, currentRoutinesUpdatedAt, finalFolders, currentFoldersUpdatedAt);
     
     if (status === "unauthenticated") return; // Guest mode does not save to server
 
@@ -672,6 +718,8 @@ export default function Home() {
           tasks: finalTasks, 
           routines: finalRoutines,
           categories: updatedCategories,
+          folders: finalFolders,
+          foldersUpdatedAt: currentFoldersUpdatedAt,
           discordWebhookUrl: webhook,
           discordNotifyTime: notifyTime,
           disciplineScore: finalDisc,
@@ -765,6 +813,35 @@ export default function Home() {
     setEditingRoutineTitle("");
     setEditingRoutineDescription("");
   };
+
+  // ── Folder Handlers ──────────────────────────────────────────────────────
+  const handleAddFolder = () => {
+    const trimmed = newFolderText.trim().slice(0, 50);
+    if (!trimmed || folders.includes(trimmed)) {
+      setShowNewFolderInput(false);
+      setNewFolderText("");
+      return;
+    }
+    const newFolders = [...folders, trimmed];
+    setFolders(newFolders);
+    setFoldersUpdatedAt(Date.now());
+    setShowNewFolderInput(false);
+    setNewFolderText("");
+    saveStateToServer(undefined, undefined, categories, undefined, undefined, undefined, undefined, undefined, newFolders);
+  };
+
+  // [Condition-2] Folder deletion with safe folderId fallback to inbox
+  const handleDeleteFolder = (folderName: string) => {
+    if (!confirm(`「${folderName}」を削除しますか？\n\n所属するタスクは「受信トレイ」に移動されます。`)) return;
+    const newFolders = folders.filter(f => f !== folderName);
+    // Reset folderId of all tasks that belonged to the deleted folder to undefined (inbox fallback)
+    const updatedTasks = tasks.map(t => t.folderId === folderName ? { ...t, folderId: undefined } : t);
+    setFolders(newFolders);
+    setFoldersUpdatedAt(Date.now());
+    setTasks(updatedTasks);
+    saveStateToServer(updatedTasks, undefined, categories, undefined, undefined, undefined, undefined, undefined, newFolders);
+  };
+
   const handleAddTask = async (e: React.FormEvent) => {
     e.preventDefault();
     const trimmedText = inputText.trim();
@@ -781,6 +858,7 @@ export default function Home() {
       dueTime: dueTime || undefined,
       notified: false,
       createdAt: Date.now(),
+      folderId: selectedFolder || undefined, // "" = 受信トレイ（未分類）
     };
 
     // ── Auto-sync to Google Calendar (only if signed in + due date set) ──
@@ -1197,12 +1275,33 @@ export default function Home() {
     <span className={`priority-dot priority-dot--${p}`} title={`優先度: ${PRIORITY_LABEL[p]}`} />
   );
 
-  // ── Priority groups split ──
-  // Compute top-level tasks to show in priority groups, hiding children (children render inside parents)
+  // ── Folder-based Hybrid Layout Computation ────────────────────────────────
+  // Compute top-level tasks only (children render recursively inside parents)
   const topLevelFilteredTasks = filteredTasks.filter((task) => !task.parentId);
+
+  // SECTION 1: Cross-folder HIGH priority tasks (regardless of folder)
   const highPriorityTasks = topLevelFilteredTasks.filter((task) => (task.priority ?? "medium") === "high");
-  const mediumPriorityTasks = topLevelFilteredTasks.filter((task) => (task.priority ?? "medium") === "medium");
-  const lowPriorityTasks = topLevelFilteredTasks.filter((task) => (task.priority ?? "medium") === "low");
+
+  // SECTION 2: Per-folder groups for medium/low tasks
+  // "受信トレイ" (inbox) = tasks with no folderId
+  const INBOX_ID = ""; // empty string represents inbox
+  const allFolderIds = [INBOX_ID, ...folders]; // inbox first, then user-defined folders
+
+  // Apply folder filter: if folderFilter is set, only show tasks in that folder (and inbox)
+  const folderFilteredMedLow = topLevelFilteredTasks.filter(
+    (task) => (task.priority ?? "medium") !== "high"
+  );
+
+  // Build folder groups (only show groups that have tasks OR are user-created folders)
+  const folderGroups: { folderId: string; label: string; tasks: Task[] }[] = [];
+  for (const fid of allFolderIds) {
+    // Apply folderFilter: if user selected a specific folder, only show that one
+    if (folderFilter !== "all" && fid !== folderFilter) continue;
+    const tasksInFolder = folderFilteredMedLow.filter(t => (t.folderId || "") === fid);
+    // Always show inbox; show folder groups only if they have tasks or folderFilter matches
+    const label = fid === INBOX_ID ? "📥 受信トレイ" : `📁 ${fid}`;
+    folderGroups.push({ folderId: fid, label, tasks: tasksInFolder });
+  }
 
 
   const renderTaskNode = (task: Task, depth: number = 0): React.ReactNode => {
@@ -1418,7 +1517,7 @@ export default function Home() {
                   onClick={() => {
                     // Open New Task input with this task as parent
                     setEditParentId(task.id);
-                    // We can reuse edit modal, but let's just create a new task
+                    // [Condition-3] Child tasks must inherit parent's folderId
                     const tempTask = {
                       id: Date.now().toString(),
                       text: "新しい子タスク",
@@ -1426,6 +1525,7 @@ export default function Home() {
                       category: task.category,
                       priority: task.priority,
                       parentId: task.id,
+                      folderId: task.folderId, // [Condition-3] Inherit parent folderId
                       createdAt: Date.now()
                     };
                     setEditingTask(tempTask as Task);
@@ -1502,6 +1602,78 @@ export default function Home() {
     );
   };
 
+  // ── Folder Accordion renderer ─────────────────────────────────────────────
+  const renderFolderSection = (folderId: string, label: string, sectionTasks: Task[]) => {
+    const isCollapsed = collapsedFolders.has(folderId || "__inbox__");
+    const toggleCollapse = () => {
+      setCollapsedFolders(prev => {
+        const key = folderId || "__inbox__";
+        const next = new Set(prev);
+        if (next.has(key)) next.delete(key); else next.add(key);
+        return next;
+      });
+    };
+
+    const isInbox = folderId === "";
+    const highCount = sectionTasks.filter(t => t.priority === "high").length;
+    const medCount = sectionTasks.filter(t => !t.priority || t.priority === "medium").length;
+    const lowCount = sectionTasks.filter(t => t.priority === "low").length;
+
+    return (
+      <div className="folder-section" key={folderId || "__inbox__"}>
+        <div className="folder-section-header" onClick={toggleCollapse}>
+          <div className="folder-section-title-wrap">
+            <span className="folder-icon">{isInbox ? "📥" : "📁"}</span>
+            <span className="folder-section-title">{isInbox ? "受信トレイ" : folderId}</span>
+            <span className="folder-priority-badges">
+              {highCount > 0 && <span className="folder-badge folder-badge--high">🔥 {highCount}</span>}
+              {medCount > 0 && <span className="folder-badge folder-badge--medium">⚡ {medCount}</span>}
+              {lowCount > 0 && <span className="folder-badge folder-badge--low">🌱 {lowCount}</span>}
+            </span>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+            {!isInbox && (
+              <button
+                type="button"
+                className="folder-delete-btn"
+                onClick={(e) => { e.stopPropagation(); handleDeleteFolder(folderId); }}
+                title={`「${folderId}」フォルダを削除`}
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                  <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+              </button>
+            )}
+            <span className="priority-section-count">{sectionTasks.length}</span>
+            <svg
+              width="14" height="14" viewBox="0 0 24 24" fill="none"
+              stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"
+              style={{
+                color: "var(--text-muted)",
+                transition: "transform 0.25s ease",
+                transform: isCollapsed ? "rotate(-90deg)" : "rotate(0deg)",
+                flexShrink: 0,
+              }}
+            >
+              <polyline points="6 9 12 15 18 9" />
+            </svg>
+          </div>
+        </div>
+
+        {!isCollapsed && (
+          <ul className="todo-list">
+            {sectionTasks.length > 0 ? (
+              sectionTasks.map(task => renderTaskNode(task))
+            ) : (
+              <div className="priority-empty-state">
+                <p>{isInbox ? "受信トレイにタスクはありません。" : "このフォルダにタスクはありません。"}</p>
+              </div>
+            )}
+          </ul>
+        )}
+      </div>
+    );
+  };
 
   // ── Render ────────────────────────────────────────────────────────────────
 
@@ -1918,6 +2090,30 @@ export default function Home() {
                     </div>
                   </div>
                 </div>
+
+                {/* Folder selector */}
+                <div className="option-group">
+                  <label>📁 フォルダ</label>
+                  <div className="category-select-container" style={{ flexWrap: "wrap", rowGap: "8px" }}>
+                    <button
+                      type="button"
+                      className={`category-select-btn ${selectedFolder === "" ? "selected study" : ""}`}
+                      onClick={() => setSelectedFolder("")}
+                    >
+                      📥 受信トレイ
+                    </button>
+                    {folders.map((f) => (
+                      <button
+                        key={f}
+                        type="button"
+                        className={`category-select-btn ${selectedFolder === f ? "selected study" : ""}`}
+                        onClick={() => setSelectedFolder(f)}
+                      >
+                        📁 {f}
+                      </button>
+                    ))}
+                  </div>
+                </div>
               </div>
             )}
           </form>
@@ -1927,12 +2123,36 @@ export default function Home() {
         <div className="list-column">
           {/* Filter controls */}
           <div className="controls-row">
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+              {/* Folder filter tabs */}
               <div className="category-filter-tabs" style={{ flexWrap: "wrap", rowGap: "4px" }}>
-                <button type="button" className={`cat-tab-btn ${categoryFilter === "all" ? "active all" : ""}`} onClick={() => setCategoryFilter("all")}>すべて</button>
-                {safeCategories.map((cat) => (
-                  <button key={cat} type="button" className={`cat-tab-btn ${categoryFilter === cat ? "active study" : ""}`} onClick={() => setCategoryFilter(cat)}>{cat}</button>
+                <button type="button" className={`cat-tab-btn ${folderFilter === "all" ? "active all" : ""}`} onClick={() => setFolderFilter("all")}>🗂 すべて</button>
+                <button type="button" className={`cat-tab-btn ${folderFilter === "" ? "active" : ""}`} onClick={() => setFolderFilter("")}>📥 受信トレイ</button>
+                {folders.map((f) => (
+                  <button key={f} type="button" className={`cat-tab-btn ${folderFilter === f ? "active study" : ""}`} onClick={() => setFolderFilter(f)}>📁 {f}</button>
                 ))}
+                {/* Add new folder button */}
+                {!showNewFolderInput ? (
+                  <button
+                    type="button"
+                    className="cat-tab-btn"
+                    style={{ background: "rgba(129,140,248,.15)", borderColor: "rgba(129,140,248,.3)", color: "var(--accent-primary)" }}
+                    onClick={() => setShowNewFolderInput(true)}
+                  >➕ フォルダ</button>
+                ) : (
+                  <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+                    <input
+                      type="text" className="date-input"
+                      style={{ padding: "4px 8px", width: "120px", height: "30px" }}
+                      placeholder="フォルダ名..." value={newFolderText}
+                      onChange={(e) => setNewFolderText(e.target.value)}
+                      maxLength={50} autoFocus
+                      onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleAddFolder(); } }}
+                    />
+                    <button type="button" className="add-button" style={{ height: "30px", padding: "0 10px", fontSize: "0.8rem", borderRadius: "8px" }} onClick={handleAddFolder}>追加</button>
+                    <button type="button" className="category-select-btn" style={{ height: "30px", padding: "0 10px", borderRadius: "8px" }} onClick={() => setShowNewFolderInput(false)}>✕</button>
+                  </div>
+                )}
               </div>
               <span style={{ fontSize: "0.8rem", color: "var(--text-muted)", flexShrink: 0 }}>同期中 🟢</span>
             </div>
@@ -1948,20 +2168,29 @@ export default function Home() {
             </div>
           </div>
 
-          {/* Task list grouped by priority */}
+          {/* ── Hybrid Task List ── */}
           <div className="priority-groups-container" id="todo-task-list">
             {filteredTasks.length > 0 ? (
               <>
-                {renderPrioritySection("high", "🔥 高（今日絶対）", "high", highPriorityTasks)}
-                {renderPrioritySection("medium", "⚡ 中（お早めに）", "medium", mediumPriorityTasks)}
-                {renderPrioritySection("low", "🌱 低（できれば）", "low", lowPriorityTasks)}
+                {/* SECTION 1: Cross-folder HIGH priority block */}
+                {(folderFilter === "all") && highPriorityTasks.length > 0 && (
+                  renderPrioritySection("high", "🔥 高優先度（全フォルダ共通）", "high", highPriorityTasks)
+                )}
+                {/* SECTION 2: Per-folder groups for medium/low tasks */}
+                {folderGroups.map(({ folderId, label, tasks: groupTasks }) =>
+                  renderFolderSection(folderId, label, groupTasks)
+                )}
+                {/* When filtered to a specific folder, also show high priority within that folder */}
+                {folderFilter !== "all" && highPriorityTasks.filter(t => (t.folderId || "") === folderFilter).length > 0 && (
+                  renderPrioritySection("high", "🔥 高優先度", "high", highPriorityTasks.filter(t => (t.folderId || "") === folderFilter))
+                )}
               </>
             ) : (
               <div className="empty-state" id="todo-empty-state">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                   <circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" />
                 </svg>
-                <p>{categoryFilter === "all" ? "タスクがありません。新しく追加してみましょう！" : `「${categoryFilter}」のタスクはありません。`}</p>
+                <p>{folderFilter === "all" ? "タスクがありません。新しく追加してみましょう！" : `このフォルダにタスクはありません。`}</p>
               </div>
             )}
           </div>

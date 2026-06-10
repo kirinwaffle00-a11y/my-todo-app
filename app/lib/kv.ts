@@ -41,6 +41,7 @@ export interface Task {
   notToDos?: NotToDo[];
   penalty?: PenaltySetting;
   notified?: boolean; // Discord notified
+  folderId?: string;  // Folder path (e.g. "大学" or "大学/課題")
 }
 
 export interface Routine {
@@ -55,6 +56,8 @@ export interface UserState {
   tasks: Task[];
   routines: Routine[];
   categories: string[];
+  folders: string[];            // Folder names (excludes "受信トレイ" which is the default)
+  foldersUpdatedAt?: number;    // Timestamp for conflict resolution
   discordWebhookUrl?: string;
   discordNotifyTime?: string;
   disciplineScore: number;
@@ -69,6 +72,7 @@ const DEFAULT_STATE: UserState = {
   tasks: [],
   routines: [],
   categories: ["勉強用", "その他"],
+  folders: [],
   discordWebhookUrl: "",
   discordNotifyTime: "08:00",
   disciplineScore: 0,
@@ -172,6 +176,8 @@ export async function getUserState(userId: string): Promise<UserState & { initia
       tasks: Array.isArray(raw.tasks) ? raw.tasks : [],
       routines: Array.isArray(raw.routines) ? raw.routines : [],
       categories: Array.isArray(raw.categories) ? raw.categories : DEFAULT_STATE.categories,
+      folders: Array.isArray(raw.folders) ? raw.folders : [],
+      foldersUpdatedAt: raw.foldersUpdatedAt,
       discordWebhookUrl: raw.discordWebhookUrl ?? "",
       discordNotifyTime: raw.discordNotifyTime ?? "08:00",
       disciplineScore: raw.disciplineScore ?? 0,
