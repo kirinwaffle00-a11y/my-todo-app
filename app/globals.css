@@ -311,11 +311,19 @@ body::after {
 .app-grid {
   display: flex;
   flex-direction: column;
+  flex: 1;
+  min-height: 0;
   gap: 24px;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+.app-grid::-webkit-scrollbar {
+  display: none;
 }
 
 .form-column {
   width: 100%;
+  flex-shrink: 0;
 }
 
 .list-column {
@@ -324,8 +332,7 @@ body::after {
   padding-top: 24px;
   display: flex;
   flex-direction: column;
-  flex: 1;
-  min-height: 0;
+  flex-shrink: 0;
 }
 
 /* Form Design with options */
@@ -1120,26 +1127,38 @@ body::after {
     padding: 40px;
   }
 
-  /* Grid splits into two equal columns */
+  /* Flex layout splits into two columns */
   .app-grid {
-    display: grid;
-    grid-template-columns: 1fr 1.15fr;
+    display: flex;
+    flex-direction: row;
     gap: 36px;
-    align-items: start;
+    align-items: stretch;
+    overflow: hidden;
   }
 
-  /* Left-hand command panel has no extra border */
+  /* Left-hand command panel */
   .form-column {
-    position: sticky;
-    top: 20px;
+    flex: 1;
+    max-width: 45%;
+    overflow-y: auto;
+    padding-right: 12px;
+    scrollbar-width: none;
+  }
+  .form-column::-webkit-scrollbar {
+    display: none;
   }
 
-  /* Right-hand list panel has premium vertical dividing border */
+  /* Right-hand list panel */
   .list-column {
+    flex: 1.15;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
     border-top: none;
     border-left: 1px solid rgba(255, 255, 255, 0.06);
     padding-top: 0;
     padding-left: 36px;
+    overflow: hidden;
   }
   
   .header {
@@ -1639,8 +1658,13 @@ body::after {
   width: 100%;
   overflow-y: auto;
   flex: 1;
+  min-height: 0;
   padding-right: 4px;
   padding-bottom: 24px;
+  scrollbar-width: none;
+}
+.priority-groups-container::-webkit-scrollbar {
+  display: none;
 }
 
 .priority-section {
