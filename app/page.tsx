@@ -1624,7 +1624,7 @@ export default function Home() {
       </header>
       
       {currentView === "todo" && (
-        <main className="main-content" style={{ display: "flex", flexDirection: "column", gap: "24px", flex: 1, minHeight: 0 }}>
+        <main className="main-content" style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
 
       {/* Notification banner */}
       {notifPermission === "default" && (
@@ -1978,7 +1978,7 @@ export default function Home() {
       )}
 
       {currentView === "routine" && (
-        <main className="main-content" style={{ display: "flex", flexDirection: "column", gap: "24px", animation: "modalFadeIn 0.3s ease", flex: 1, minHeight: 0, overflowY: "auto" }}>
+        <main className="main-content" style={{ display: "flex", flexDirection: "column", gap: "24px", animation: "modalFadeIn 0.3s ease" }}>
           <div className="glass-panel" style={{ padding: "24px", borderRadius: "16px" }}>
             <h2 style={{ display: "flex", alignItems: "center", gap: "8px", margin: "0 0 16px 0", color: "var(--text)" }}>
               <span>🔁</span> 習慣トラッカー
